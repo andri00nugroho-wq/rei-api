@@ -1,10 +1,29 @@
 <?php
 session_start();
+ini_set('display_errors', 1);
+error_reporting(E_ALL);
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header("Location: login.php");
     exit;
 }
 require 'config.php';
+
+// Otomatis buat tabel branches jika belum ada
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS `branches` (
+      `id` INT AUTO_INCREMENT PRIMARY KEY,
+      `branch_number` VARCHAR(10) NOT NULL,
+      `title` VARCHAR(255) NOT NULL,
+      `address` TEXT NOT NULL,
+      `phone` VARCHAR(50) NOT NULL,
+      `hours` VARCHAR(100) NOT NULL,
+      `notes` VARCHAR(255) DEFAULT NULL,
+      `map_embed_url` TEXT NOT NULL,
+      `map_link` TEXT NOT NULL,
+      `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )");
+} catch (PDOException $e) {}
 
 $page = $_GET['page'] ?? 'dashboard';
 $msg = '';
@@ -34,7 +53,7 @@ if ($page === 'slider' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST[
     $msg = "Pengaturan tampilan & indikator slider berhasil disimpan!";
 }
 
-// C. Proses Upload Slider (Dengan Pilihan Halaman Target)
+// C. Proses Upload Slider
 if ($page === 'slider' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['slider_image'])) {
     $target_dir = "uploads/";
     if (!is_dir($target_dir)) mkdir($target_dir, 0777, true);
@@ -76,7 +95,26 @@ if ($page === 'menus' && isset($_GET['delete_menu'])) {
     exit;
 }
 
-// E. Proses Kelola Halaman (Pages) dengan HTML/CSS/JS Kustom & Try-Catch
+// E. Proses Kelola Kategori Post
+if ($page === 'categories' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $name = $_POST['name'];
+    $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $name)));
+    try {
+        $stmt = $pdo->prepare("INSERT INTO post_categories (name, slug) VALUES (?, ?)");
+        $stmt->execute([$name, $slug]);
+        $msg = "Kategori berhasil ditambahkan!";
+    } catch (PDOException $e) {
+        $msg = "Error: Kategori sudah ada atau gagal disimpan.";
+    }
+}
+if ($page === 'categories' && isset($_GET['delete_cat'])) {
+    $cat_id = $_GET['delete_cat'];
+    $pdo->prepare("DELETE FROM post_categories WHERE id = ?")->execute([$cat_id]);
+    header("Location: admin.php?page=categories");
+    exit;
+}
+
+// F. Proses Kelola Halaman (Pages)
 if ($page === 'pages' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $title = $_POST['title'];
     $slug = strtolower(trim(preg_replace('/[^A-Za-z0-9-]+/', '-', $title)));
@@ -113,17 +151,82 @@ if ($page === 'pages' && isset($_GET['delete_page'])) {
     exit;
 }
 
-// --- AMBIL DATA ---
-$posts = $pdo->query("SELECT * FROM posts WHERE type='post' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
-$pages_list = $pdo->query("SELECT * FROM posts WHERE type='page' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
-$sliders = $pdo->query("SELECT * FROM sliders ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
-$theme = $pdo->query("SELECT * FROM theme_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
-$s_set = $pdo->query("SELECT * FROM slider_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
-$parent_menus = $pdo->query("SELECT * FROM menus WHERE parent_id = 0 ORDER BY sort_order ASC")->fetchAll(PDO::FETCH_ASSOC);
-$all_menus = $pdo->query("SELECT * FROM menus ORDER BY parent_id ASC, sort_order ASC")->fetchAll(PDO::FETCH_ASSOC);
-$total_visitors = $pdo->query("SELECT total_views FROM visitor_stats WHERE id = 1")->fetchColumn() ?: 0;
+// G. Proses Kelola Cabang Toko (Tambah, Edit, Hapus)
+if ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action']) && $_POST['action'] === 'edit') {
+        $stmt = $pdo->prepare("UPDATE branches SET branch_number = ?, title = ?, address = ?, phone = ?, hours = ?, notes = ?, map_embed_url = ?, map_link = ? WHERE id = ?");
+        $stmt->execute([
+            $_POST['branch_number'], $_POST['title'], $_POST['address'], 
+            $_POST['phone'], $_POST['hours'], $_POST['notes'], 
+            $_POST['map_embed_url'], $_POST['map_link'], $_POST['branch_id']
+        ]);
+        $msg = "Cabang toko berhasil diperbarui!";
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO branches (branch_number, title, address, phone, hours, notes, map_embed_url, map_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $_POST['branch_number'], $_POST['title'], $_POST['address'], 
+            $_POST['phone'], $_POST['hours'], $_POST['notes'], 
+            $_POST['map_embed_url'], $_POST['map_link']
+        ]);
+        $msg = "Cabang toko berhasil ditambahkan!";
+    }
+}
+if ($page === 'branches' && isset($_GET['delete_branch'])) {
+    $id = $_GET['delete_branch'];
+    $pdo->prepare("DELETE FROM branches WHERE id = ?")->execute([$id]);
+    header("Location: admin.php?page=branches");
+    exit;
+}
 
-$chart_data = $pdo->query("SELECT visit_date, views FROM daily_visitors ORDER BY visit_date ASC LIMIT 7")->fetchAll(PDO::FETCH_ASSOC);
+$edit_branch_data = null;
+if ($page === 'branches' && isset($_GET['edit_branch'])) {
+    $stmt_edit = $pdo->prepare("SELECT * FROM branches WHERE id = ?");
+    $stmt_edit->execute([$_GET['edit_branch']]);
+    $edit_branch_data = $stmt_edit->fetch(PDO::FETCH_ASSOC);
+}
+
+// --- AMBIL DATA DENGAN AMAN ---
+try {
+    $posts = $pdo->query("SELECT posts.*, post_categories.name as category_name FROM posts LEFT JOIN post_categories ON posts.category_id = post_categories.id WHERE posts.type='post' ORDER BY posts.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $posts = []; }
+
+try {
+    $pages_list = $pdo->query("SELECT * FROM posts WHERE type='page' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $pages_list = []; }
+
+try {
+    $sliders = $pdo->query("SELECT * FROM sliders ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $sliders = []; }
+
+try {
+    $branches_list = $pdo->query("SELECT * FROM branches ORDER BY branch_number ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $branches_list = []; }
+
+try {
+    $theme = $pdo->query("SELECT * FROM theme_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $theme = []; }
+
+try {
+    $s_set = $pdo->query("SELECT * FROM slider_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $s_set = []; }
+
+try {
+    $parent_menus = $pdo->query("SELECT * FROM menus WHERE parent_id = 0 ORDER BY sort_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+    $all_menus = $pdo->query("SELECT * FROM menus ORDER BY parent_id ASC, sort_order ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $parent_menus = []; $all_menus = []; }
+
+try {
+    $categories_list = $pdo->query("SELECT * FROM post_categories ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $categories_list = []; }
+
+try {
+    $total_visitors = $pdo->query("SELECT total_views FROM visitor_stats WHERE id = 1")->fetchColumn() ?: 0;
+} catch (PDOException $e) { $total_visitors = 0; }
+
+try {
+    $chart_data = $pdo->query("SELECT visit_date, views FROM daily_visitors ORDER BY visit_date ASC LIMIT 7")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) { $chart_data = []; }
+
 $chart_labels = [];
 $chart_values = [];
 foreach($chart_data as $cd) {
@@ -137,6 +240,8 @@ foreach($chart_data as $cd) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - REI-CMS</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="logo-rei-2.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -147,41 +252,59 @@ foreach($chart_data as $cd) {
     </script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .sidebar-scroll::-webkit-scrollbar { width: 5px; }
+        .sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
     </style>
 </head>
 <body class="text-gray-800 antialiased">
-
-    <!-- Container Utama Menggantung (Floating Card Layout) -->
     <div class="flex h-screen overflow-hidden p-3 md:p-4 gap-4">
         
-        <!-- Sidebar Menggantung -->
-        <aside class="hidden md:flex flex-col w-64 bg-white rounded-3xl shadow-xl border border-gray-100/80 z-10 overflow-hidden transition-all duration-300">
-            <!-- Header Logo Ungu Tua -->
-            <div class="flex items-center justify-center h-20 px-4 bg-purple-900 shadow-inner m-3 rounded-2xl">
-                <img src="logo-rei.png" alt="Logo Raja Emas Indonesia" class="max-h-8 w-auto object-contain filter brightness-150 contrast-125 drop-shadow-md">
+        <aside class="hidden md:flex flex-col w-72 bg-white rounded-3xl shadow-xl border border-gray-100/80 z-10 overflow-hidden transition-all duration-300">
+            <div class="flex items-center justify-center h-20 px-4 bg-gradient-to-br from-purple-600 to-black shadow-inner m-3 rounded-2xl shrink-0">
+                <img src="logo-rei.png" alt="Logo" class="max-h-14 w-auto object-contain filter brightness-150 contrast-125 drop-shadow-md">
             </div>
             
-            <!-- Navigasi Menu (Nuansa Turkish / Teal) -->
-            <nav class="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
-                <a href="admin.php?page=dashboard" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'dashboard' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+            <nav class="flex-1 px-3 py-2 space-y-1.5 overflow-y-auto sidebar-scroll">
+                <a href="admin.php?page=dashboard" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'dashboard' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">dashboard</span> Dashboard
                 </a>
-                <a href="admin.php?page=posts" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'posts' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
-                    <span class="material-icons text-lg">article</span> Post
-                </a>
-                <a href="admin.php?page=pages" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'pages' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                
+                <div class="space-y-1">
+                    <button type="button" onclick="toggleSubmenu('post-submenu', 'post-arrow')" class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium rounded-2xl <?= ($page === 'posts' || $page === 'categories') ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                        <span class="flex items-center gap-3">
+                            <span class="material-icons text-lg">article</span> Post
+                        </span>
+                        <span id="post-arrow" class="material-icons text-sm transform transition-transform duration-200 <?= ($page === 'posts' || $page === 'categories') ? 'rotate-180' : '' ?>">expand_more</span>
+                    </button>
+                    
+                    <div id="post-submenu" class="<?= ($page === 'posts' || $page === 'categories') ? 'block' : 'hidden' ?> pl-3 space-y-1">
+                        <a href="admin.php?page=posts" class="flex items-center gap-2 pl-8 pr-4 py-2.5 text-xs font-medium rounded-xl <?= $page === 'posts' ? 'bg-gray-200 text-gray-900 font-semibold shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900' ?> transition">
+                            <span class="material-icons text-xs">list</span> Semua Artikel
+                        </a>
+                        <a href="admin.php?page=categories" class="flex items-center gap-2 pl-8 pr-4 py-2.5 text-xs font-medium rounded-xl <?= $page === 'categories' ? 'bg-gray-200 text-gray-900 font-semibold shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900' ?> transition">
+                            <span class="material-icons text-xs">category</span> Kategori Post
+                        </a>
+                    </div>
+                </div>
+
+                <a href="admin.php?page=pages" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'pages' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">description</span> Halaman
                 </a>
-                <a href="admin.php?page=menus" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'menus' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                <a href="admin.php?page=menus" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'menus' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">menu</span> Menu
                 </a>
-                <a href="admin.php?page=slider" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'slider' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                <a href="admin.php?page=slider" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'slider' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">collections</span> Slider
                 </a>
-                <a href="admin.php?page=theme" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'theme' ? 'bg-teal-700 text-white shadow-md shadow-teal-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                <a href="admin.php?page=branches" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'branches' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                    <span class="material-icons text-lg">storefront</span> Cabang Toko
+                </a>
+                <a href="admin.php?page=theme" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'theme' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">palette</span> Tema
                 </a>
                 <a href="index.php" target="_blank" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl text-gray-600 hover:bg-gray-50 transition">
@@ -189,48 +312,42 @@ foreach($chart_data as $cd) {
                 </a>
             </nav>
 
-            <!-- Tombol Logout -->
-            <div class="p-3 border-t border-gray-100 bg-gray-50/50">
-                <a href="logout.php" class="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-red-600 rounded-xl hover:bg-red-50 transition">
+            <div class="p-3 border-t border-gray-100 bg-gray-50/50 shrink-0">
+                <a href="logout.php" class="flex items-center gap-3 px-4 py-3 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-black rounded-xl hover:opacity-95 transition shadow-sm">
                     <span class="material-icons text-lg">logout</span> Logout
                 </a>
             </div>
         </aside>
 
-        <!-- Area Konten Utama Kanan (Floating Card Panel) -->
         <div class="flex flex-col flex-1 h-full bg-white rounded-3xl shadow-xl border border-gray-100/80 overflow-hidden">
-            
             <header class="flex items-center justify-between h-20 px-8 bg-white border-b border-gray-100 z-10 shrink-0">
                 <h1 class="text-xl font-bold text-gray-800 capitalize">Panel: <?= htmlspecialchars($page) ?></h1>
                 <?php if($page === 'posts'): ?>
-                    <a href="add.php" class="inline-flex items-center gap-2 bg-teal-700 hover:bg-teal-800 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-md shadow-teal-100 transition">
+                    <a href="add.php" class="inline-flex items-center gap-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-md shadow-cyan-100 transition">
                         <span class="material-icons text-sm">add</span> Artikel Baru
                     </a>
                 <?php endif; ?>
             </header>
 
             <main class="flex-1 overflow-y-auto p-6 md:p-8 bg-gray-50/40">
-                
-                <!-- 1. DASHBOARD UTAMA -->
                 <?php if ($page === 'dashboard'): ?>
                     <div class="space-y-6">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="bg-gradient-to-br from-teal-700 to-teal-900 text-white p-6 rounded-2xl shadow-sm flex flex-col justify-between">
+                            <div class="bg-gradient-to-br from-cyan-600 to-cyan-900 text-white p-6 rounded-2xl shadow-sm flex flex-col justify-between">
                                 <div class="flex justify-between items-center">
                                     <span class="text-xs uppercase tracking-wider font-semibold opacity-80">Waktu Lokal Server</span>
                                     <span class="material-icons opacity-80">schedule</span>
                                 </div>
                                 <div class="my-4">
                                     <h2 id="live-clock" class="text-4xl font-bold tracking-tight">00:00:00</h2>
-                                    <p id="live-date" class="text-teal-100 text-sm mt-1">Memuat tanggal...</p>
+                                    <p id="live-date" class="text-cyan-100 text-sm mt-1">Memuat tanggal...</p>
                                 </div>
                                 <div class="text-xs opacity-75">Zona Waktu Aktif: Sistem Lokal</div>
                             </div>
-
                             <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between">
                                 <div class="flex justify-between items-center mb-2">
                                     <span id="cal-month-year" class="text-sm font-bold text-gray-800">Bulan Tahun</span>
-                                    <span class="material-icons text-teal-700">event</span>
+                                    <span class="material-icons text-cyan-600">event</span>
                                 </div>
                                 <div class="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-gray-400 mb-1">
                                     <span>Min</span><span>Sen</span><span>Sel</span><span>Rab</span><span>Kam</span><span>Jum</span><span>Sab</span>
@@ -238,60 +355,29 @@ foreach($chart_data as $cd) {
                                 <div id="cal-days" class="grid grid-cols-7 gap-1 text-center text-sm"></div>
                             </div>
                         </div>
-
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
-                                <div>
-                                    <p class="text-xs font-medium text-gray-400 uppercase">Total Postingan</p>
-                                    <h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($posts) ?></h4>
-                                </div>
-                                <div class="w-10 h-10 bg-teal-50 text-teal-700 rounded-xl flex items-center justify-center">
-                                    <span class="material-icons text-sm">article</span>
-                                </div>
+                                <div><p class="text-xs font-medium text-gray-400 uppercase">Total Postingan</p><h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($posts) ?></h4></div>
+                                <div class="w-10 h-10 bg-cyan-50 text-cyan-600 rounded-xl flex items-center justify-center"><span class="material-icons text-sm">article</span></div>
                             </div>
-
                             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
-                                <div>
-                                    <p class="text-xs font-medium text-gray-400 uppercase">Halaman Statis</p>
-                                    <h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($pages_list) ?></h4>
-                                </div>
-                                <div class="w-10 h-10 bg-cyan-50 text-cyan-700 rounded-xl flex items-center justify-center">
-                                    <span class="material-icons text-sm">description</span>
-                                </div>
+                                <div><p class="text-xs font-medium text-gray-400 uppercase">Kategori Post</p><h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($categories_list) ?></h4></div>
+                                <div class="w-10 h-10 bg-sky-50 text-sky-600 rounded-xl flex items-center justify-center"><span class="material-icons text-sm">category</span></div>
                             </div>
-
                             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
-                                <div>
-                                    <p class="text-xs font-medium text-gray-400 uppercase">Slider Aktif</p>
-                                    <h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($sliders) ?></h4>
-                                </div>
-                                <div class="w-10 h-10 bg-emerald-50 text-emerald-700 rounded-xl flex items-center justify-center">
-                                    <span class="material-icons text-sm">collections</span>
-                                </div>
+                                <div><p class="text-xs font-medium text-gray-400 uppercase">Cabang Toko</p><h4 class="text-2xl font-bold text-gray-900 mt-1"><?= count($branches_list) ?></h4></div>
+                                <div class="w-10 h-10 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center"><span class="material-icons text-sm">storefront</span></div>
                             </div>
-
                             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
-                                <div>
-                                    <p class="text-xs font-medium text-gray-400 uppercase">Total Pengunjung</p>
-                                    <h4 class="text-2xl font-bold text-gray-900 mt-1"><?= number_format($total_visitors) ?></h4>
-                                </div>
-                                <div class="w-10 h-10 bg-amber-50 text-amber-700 rounded-xl flex items-center justify-center">
-                                    <span class="material-icons text-sm">visibility</span>
-                                </div>
+                                <div><p class="text-xs font-medium text-gray-400 uppercase">Total Pengunjung</p><h4 class="text-2xl font-bold text-gray-900 mt-1"><?= number_format($total_visitors) ?></h4></div>
+                                <div class="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center"><span class="material-icons text-sm">visibility</span></div>
                             </div>
                         </div>
-
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <div class="flex justify-between items-center mb-4">
-                                <h3 class="font-semibold text-gray-800">Grafik Statistik Pengunjung (7 Hari Terakhir)</h3>
-                                <span class="text-xs font-medium text-gray-400 bg-gray-50 px-2.5 py-1 rounded-lg">Real-time Analytics</span>
-                            </div>
-                            <div style="height: 280px; position: relative;">
-                                <canvas id="visitorChart"></canvas>
-                            </div>
+                            <div class="flex justify-between items-center mb-4"><h3 class="font-semibold text-gray-800">Grafik Statistik Pengunjung</h3></div>
+                            <div style="height: 280px; position: relative;"><canvas id="visitorChart"></canvas></div>
                         </div>
                     </div>
-
                     <script>
                         function updateClock() {
                             const now = new Date();
@@ -301,7 +387,6 @@ foreach($chart_data as $cd) {
                         }
                         setInterval(updateClock, 1000);
                         updateClock();
-
                         function renderCalendar() {
                             const now = new Date();
                             const year = now.getFullYear();
@@ -311,72 +396,146 @@ foreach($chart_data as $cd) {
                             const totalDays = new Date(year, month + 1, 0).getDate();
                             const monthsNames = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
                             document.getElementById('cal-month-year').innerText = `${monthsNames[month]} ${year}`;
-
                             let daysHTML = '';
                             for (let i = 0; i < firstDay; i++) { daysHTML += `<span></span>`; }
                             for (let d = 1; d <= totalDays; d++) {
-                                let isToday = (d === today) ? 'bg-teal-700 text-white rounded-full font-bold' : 'text-gray-700 hover:bg-gray-100 rounded-full';
+                                let isToday = (d === today) ? 'bg-cyan-600 text-white rounded-full font-bold' : 'text-gray-700 hover:bg-gray-100 rounded-full';
                                 daysHTML += `<span class="h-7 w-7 flex items-center justify-center mx-auto text-xs ${isToday}">${d}</span>`;
                             }
                             document.getElementById('cal-days').innerHTML = daysHTML;
                         }
                         renderCalendar();
-
                         const ctx = document.getElementById('visitorChart').getContext('2d');
                         new Chart(ctx, {
                             type: 'line',
                             data: {
                                 labels: <?= json_encode($chart_labels) ?>,
-                                datasets: [{
-                                    label: 'Jumlah Pengunjung',
-                                    data: <?= json_encode($chart_values) ?>,
-                                    borderColor: '#0f766e',
-                                    backgroundColor: 'rgba(15, 118, 110, 0.08)',
-                                    borderWidth: 3,
-                                    fill: true,
-                                    tension: 0.35,
-                                    pointBackgroundColor: '#0f766e',
-                                    pointRadius: 4
-                                }]
+                                datasets: [{ label: 'Pengunjung', data: <?= json_encode($chart_values) ?>, borderColor: '#0891b2', backgroundColor: 'rgba(8, 145, 178, 0.08)', borderWidth: 3, fill: true, tension: 0.35 }]
                             },
-                            options: {
-                                responsive: true,
-                                maintainAspectRatio: false,
-                                plugins: { legend: { display: false } },
-                                scales: {
-                                    y: { beginAtZero: true, grid: { color: '#f3f4f6' } },
-                                    x: { grid: { display: false } }
-                                }
-                            }
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } }
                         });
                     </script>
 
-                <!-- 2. KELOLA POST -->
+                <?php elseif ($page === 'branches'): ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        
+                        <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm h-fit">
+                            <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                <span class="material-icons text-cyan-600"><?= $edit_branch_data ? 'edit' : 'add_business' ?></span> 
+                                <?= $edit_branch_data ? 'Edit Cabang Toko' : 'Tambah Cabang Toko' ?>
+                            </h3>
+                            <form method="POST" class="space-y-4">
+                                <?php if($edit_branch_data): ?>
+                                    <input type="hidden" name="action" value="edit">
+                                    <input type="hidden" name="branch_id" value="<?= $edit_branch_data['id'] ?>">
+                                <?php endif; ?>
+
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">No. Cabang (Contoh: 01, 02)</label>
+                                    <input type="text" name="branch_number" required value="<?= htmlspecialchars($edit_branch_data['branch_number'] ?? '') ?>" placeholder="01" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Nama Cabang / Judul</label>
+                                    <input type="text" name="title" required value="<?= htmlspecialchars($edit_branch_data['title'] ?? '') ?>" placeholder="Jakarta Utara - Batavia PIK" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Alamat Lengkap</label>
+                                    <textarea name="address" required rows="2" placeholder="Rukan Golf Island..." class="w-full mt-1 p-2.5 border rounded-xl text-sm"><?= htmlspecialchars($edit_branch_data['address'] ?? '') ?></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">No. HP / WhatsApp</label>
+                                    <input type="text" name="phone" required value="<?= htmlspecialchars($edit_branch_data['phone'] ?? '') ?>" placeholder="0822-9999-5125" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Jam Operasional</label>
+                                    <input type="text" name="hours" required value="<?= htmlspecialchars($edit_branch_data['hours'] ?? '') ?>" placeholder="Pukul 10.00 - 21.00 WIB" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Catatan Khusus</label>
+                                    <input type="text" name="notes" value="<?= htmlspecialchars($edit_branch_data['notes'] ?? '') ?>" placeholder="BUKA SETIAP HARI" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Link URL Embed Google Maps (src iframe saja)</label>
+                                    <textarea name="map_embed_url" rows="2" placeholder="https://www.google.com/maps/embed?pb=..." class="w-full mt-1 p-2.5 border rounded-xl text-xs font-mono"><?= htmlspecialchars($edit_branch_data['map_embed_url'] ?? '') ?></textarea>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Link Tombol "Menuju Lokasi"</label>
+                                    <input type="text" name="map_link" value="<?= htmlspecialchars($edit_branch_data['map_link'] ?? '') ?>" placeholder="https://maps.google.com/?q=..." class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <button type="submit" class="flex-1 bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition shadow-md">
+                                        <?= $edit_branch_data ? 'Perbarui Cabang' : 'Simpan Cabang' ?>
+                                    </button>
+                                    <?php if($edit_branch_data): ?>
+                                        <a href="admin.php?page=branches" class="px-4 bg-gray-200 text-gray-700 text-sm font-medium py-2.5 rounded-xl hover:bg-gray-300 transition text-center">Batal</a>
+                                    <?php endif; ?>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                            <h3 class="font-semibold text-gray-800 mb-4">Daftar & Pratinjau Cabang Toko</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <?php if(empty($branches_list)): ?>
+                                    <p class="text-sm text-gray-400 italic col-span-2">Belum ada cabang toko yang ditambahkan.</p>
+                                <?php else: ?>
+                                    <?php foreach($branches_list as$b): ?>
+                                    <div class="border-2 border-[#3b1c32] rounded-[30px] p-6 flex flex-col justify-between bg-white shadow-sm relative">
+                                        <div>
+                                            <div class="flex justify-between items-start mb-3">
+                                                <div>
+                                                    <span class="text-2xl font-bold text-gray-900"><?= htmlspecialchars($b['branch_number']) ?></span>
+                                                    <h4 class="text-xl font-bold text-gray-900 mt-1 leading-snug"><?= htmlspecialchars($b['title']) ?></h4>
+                                                </div>
+                                                <div class="flex items-center gap-1">
+                                                    <a href="admin.php?page=branches&edit_branch=<?= $b['id'] ?>" class="text-amber-600 hover:text-amber-800 bg-amber-50 p-2 rounded-xl" title="Edit"><span class="material-icons text-sm">edit</span></a>
+                                                    <a href="admin.php?page=branches&delete_branch=<?= $b['id'] ?>" onclick="return confirm('Hapus cabang ini?')" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-xl" title="Hapus"><span class="material-icons text-sm">delete</span></a>
+                                                </div>
+                                            </div>
+                                            <p class="text-sm text-gray-700 mb-4"><?= nl2br(htmlspecialchars($b['address'])) ?></p>
+                                            <p class="text-sm font-semibold text-[#3b1c32] mb-3 underline">Hp & Whatsapp: <?= htmlspecialchars($b['phone']) ?></p>
+                                            <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars($b['hours']) ?></p>
+                                            <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars($b['notes']) ?></p>
+
+                                            <?php if(!empty($b['map_embed_url']) && str_contains($b['map_embed_url'], 'embed')): ?>
+                                            <div class="rounded-xl overflow-hidden h-40 border border-gray-200 mb-4 relative">
+                                                <iframe src="<?= htmlspecialchars($b['map_embed_url']) ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                                            </div>
+                                            <?php else: ?>
+                                            <div class="rounded-xl overflow-hidden h-40 border border-dashed border-gray-300 mb-4 flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
+                                                <span class="material-icons text-gray-400 mb-1">map</span>
+                                                <span class="text-xs text-gray-500 font-medium">Link Peta Belum Valid / Salah</span>
+                                                <span class="text-[10px] text-gray-400 mt-0.5">Gunakan URL Embed dari Google Maps (src iframe)</span>
+                                            </div>
+                                            <?php endif; ?>
+                                        </div>
+                                        <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link']) : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
+                                            Menuju Lokasi <span class="material-icons text-sm">north_east</span>
+                                        </a>
+                                    </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+
                 <?php elseif ($page === 'posts'): ?>
                     <div class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-                        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                            <h3 class="font-semibold text-gray-800">Daftar Artikel (Blog Post)</h3>
-                            <span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full"><?= count($posts) ?> Postingan</span>
-                        </div>
+                        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center"><h3 class="font-semibold text-gray-800">Daftar Artikel</h3><span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full"><?= count($posts) ?> Postingan</span></div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100">
-                                        <th class="py-3 px-6">ID</th>
-                                        <th class="py-3 px-6">Judul Artikel</th>
-                                        <th class="py-3 px-6">Tanggal</th>
-                                        <th class="py-3 px-6 text-center">Aksi</th>
-                                    </tr>
-                                </thead>
+                                <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-6">ID</th><th class="py-3 px-6">Judul Artikel & Kategori</th><th class="py-3 px-6">Tanggal</th><th class="py-3 px-6 text-center">Aksi</th></tr></thead>
                                 <tbody class="divide-y divide-gray-100 text-sm">
                                     <?php foreach ($posts as$post): ?>
                                     <tr class="hover:bg-gray-50 transition">
                                         <td class="py-4 px-6 text-gray-500">#<?= $post['id'] ?></td>
-                                        <td class="py-4 px-6 font-medium text-gray-900"><?= htmlspecialchars($post['title']) ?></td>
+                                        <td class="py-4 px-6 font-medium text-gray-900"><?= htmlspecialchars($post['title']) ?><?php if(!empty($post['category_name'])): ?><span class="block text-[11px] font-normal text-cyan-600 mt-0.5">Kategori: <?= htmlspecialchars($post['category_name']) ?></span><?php endif; ?></td>
                                         <td class="py-4 px-6 text-gray-500"><?= date('d M Y, H:i', strtotime($post['created_at'])) ?></td>
                                         <td class="py-4 px-6 text-center space-x-2">
-                                            <a href="edit.php?id=<?= $post['id'] ?>" class="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 inline-block"><span class="material-icons text-sm">edit</span></a>
-                                            <a href="delete.php?id=<?= $post['id'] ?>" class="p-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 inline-block" onclick="return confirm('Hapus?')"><span class="material-icons text-sm">delete</span></a>
+                                            <a href="edit.php?id=<?= $post['id'] ?>" class="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 inline-block"><span class="material-icons text-sm">edit</span></a>
+                                            <a href="delete.php?id=<?= $post['id'] ?>" class="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 inline-block" onclick="return confirm('Hapus?')"><span class="material-icons text-sm">delete</span></a>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -385,237 +544,163 @@ foreach($chart_data as $cd) {
                         </div>
                     </div>
 
-                <!-- 3. KELOLA HALAMAN (PAGES) -->
-                <?php elseif ($page === 'pages'): ?>
-                    <?php if($msg): ?>
-                        <div class='mb-4 p-4 <?= strpos($msg, "Error") !== false ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700" ?> rounded-xl text-sm'>
-                            <?= htmlspecialchars($msg) ?>
+                <?php elseif ($page === 'categories'): ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                            <h3 class="font-semibold text-gray-800 mb-4">Tambah Kategori Baru</h3>
+                            <form method="POST" class="space-y-4">
+                                <div><label class="text-xs font-medium text-gray-500">Nama Kategori</label><input type="text" name="name" placeholder="Contoh: Berita" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
+                                <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Simpan Kategori</button>
+                            </form>
                         </div>
-                    <?php endif; ?>
-                    
+                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                            <h3 class="font-semibold text-gray-800 mb-4">Daftar Kategori</h3>
+                            <table class="w-full text-left border-collapse">
+                                <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-4">Nama</th><th class="py-3 px-4">Slug</th><th class="py-3 px-4 text-center">Aksi</th></tr></thead>
+                                <tbody class="divide-y divide-gray-100 text-sm">
+                                    <?php foreach($categories_list as$cat): ?>
+                                    <tr class="hover:bg-gray-50 transition">
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($cat['name']) ?></td>
+                                        <td class="py-3 px-4 text-cyan-600 text-xs font-mono"><?= $cat['slug'] ?></td>
+                                        <td class="py-3 px-4 text-center"><a href="admin.php?page=categories&delete_cat=<?= $cat['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium" onclick="return confirm('Hapus?')">Hapus</a></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                <?php elseif ($page === 'pages'): ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                             <h3 class="font-semibold text-gray-800 mb-4">Buat Halaman</h3>
                             <form method="POST" enctype="multipart/form-data" class="space-y-4">
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Judul Halaman</label>
-                                    <input type="text" name="title" placeholder="Contoh: Landing Page" required class="w-full mt-1 p-2.5 border rounded-xl text-sm">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Gambar Utama / Banner (Opsional)</label>
-                                    <input type="file" name="featured_image" accept="image/*" class="w-full mt-1 text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Konten Standar / Editor (Opsional)</label>
-                                    <textarea name="content" class="editor"></textarea>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-700 font-semibold">Custom HTML Code</label>
-                                    <textarea name="custom_html" placeholder="<div class='box'><h1>Halo</h1></div>" class="w-full mt-1 p-3 border rounded-xl text-xs font-mono bg-gray-50" rows="4"></textarea>
-                                </div>
-                                <div class="grid grid-cols-1 gap-3">
-                                    <div>
-                                        <label class="text-xs font-medium text-gray-700 font-semibold">Custom CSS</label>
-                                        <textarea name="custom_css" placeholder=".box { background: #333; }" class="w-full mt-1 p-2 border rounded-xl text-xs font-mono bg-gray-50" rows="3"></textarea>
-                                    </div>
-                                    <div>
-                                        <label class="text-xs font-medium text-gray-700 font-semibold">Custom JavaScript</label>
-                                        <textarea name="custom_js" placeholder="console.log('OK');" class="w-full mt-1 p-2 border rounded-xl text-xs font-mono bg-gray-50" rows="3"></textarea>
-                                    </div>
-                                </div>
-                                <button type="submit" class="w-full bg-teal-700 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-teal-800 transition">Publikasikan Halaman</button>
+                                <div><label class="text-xs font-medium text-gray-500">Judul</label><input type="text" name="title" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
+                                <div><label class="text-xs font-medium text-gray-500">Gambar</label><input type="file" name="featured_image" accept="image/*" class="w-full mt-1 text-sm"></div>
+                                <div><label class="text-xs font-medium text-gray-500">Konten</label><textarea name="content" class="editor"></textarea></div>
+                                <div><label class="text-xs font-medium text-gray-700 font-semibold">HTML Kustom</label><textarea name="custom_html" class="w-full mt-1 p-3 border rounded-xl text-xs font-mono bg-gray-50" rows="3"></textarea></div>
+                                <div><label class="text-xs font-medium text-gray-700 font-semibold">CSS Kustom</label><textarea name="custom_css" class="w-full mt-1 p-2 border rounded-xl text-xs font-mono bg-gray-50" rows="2"></textarea></div>
+                                <div><label class="text-xs font-medium text-gray-700 font-semibold">JS Kustom</label><textarea name="custom_js" class="w-full mt-1 p-2 border rounded-xl text-xs font-mono bg-gray-50" rows="2"></textarea></div>
+                                <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Publikasikan</button>
                             </form>
                         </div>
-
                         <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Daftar Halaman Statis</h3>
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100">
-                                            <th class="py-3 px-4">Judul Halaman</th>
-                                            <th class="py-3 px-4">URL Slug</th>
-                                            <th class="py-3 px-4 text-center">Aksi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100 text-sm">
-                                        <?php foreach($pages_list as$p): ?>
-                                        <tr class="hover:bg-gray-50 transition">
-                                            <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title']) ?></td>
-                                            <td class="py-3 px-4 text-teal-700 text-xs font-mono">index.php?page=<?= $p['slug'] ?></td>
-                                            <td class="py-3 px-4 text-center space-x-2">
-                                                <a href="index.php?page=<?= $p['slug'] ?>" target="_blank" class="text-gray-500 hover:text-gray-700 text-xs font-medium">Lihat</a>
-                                                <a href="admin.php?page=pages&delete_page=<?= $p['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium" onclick="return confirm('Hapus halaman ini?')">Hapus</a>
-                                            </td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                        <?php if(count($pages_list) === 0): ?>
-                                            <tr><td colspan="3" class="py-6 text-center text-gray-400">Belum ada halaman statis.</td></tr>
-                                        <?php endif; ?>
-                                    </tbody>
-                                </table>
-                            </div>
+                            <h3 class="font-semibold text-gray-800 mb-4">Daftar Halaman</h3>
+                            <table class="w-full text-left border-collapse">
+                                <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-4">Judul</th><th class="py-3 px-4">Slug</th><th class="py-3 px-4 text-center">Aksi</th></tr></thead>
+                                <tbody class="divide-y divide-gray-100 text-sm">
+                                    <?php foreach($pages_list as$p): ?>
+                                    <tr class="hover:bg-gray-50 transition">
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title']) ?></td>
+                                        <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= $p['slug'] ?></td>
+                                        <td class="py-3 px-4 text-center space-x-2">
+                                            <a href="<?= $p['slug'] ?>" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                                <span class="material-icons text-xs">visibility</span> Lihat
+                                            </a>
+                                            <a href="edit-page.php?id=<?= $p['id'] ?>" class="text-amber-600 hover:text-amber-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                                <span class="material-icons text-xs">edit</span> Edit
+                                            </a>
+                                            <a href="admin.php?page=pages&delete_page=<?= $p['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium inline-flex items-center gap-0.5" onclick="return confirm('Hapus halaman ini?')">
+                                                <span class="material-icons text-xs">delete</span> Hapus
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                <!-- 4. KELOLA MENU -->
                 <?php elseif ($page === 'menus'): ?>
-                    <?php if($msg) echo "<div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm'>$msg</div>"; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Tambah Menu / Sub-Menu</h3>
+                            <h3 class="font-semibold text-gray-800 mb-4">Tambah Menu</h3>
                             <form method="POST" class="space-y-4">
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Nama Menu</label>
-                                    <input type="text" name="title" placeholder="Contoh: Tentang Kami" required class="w-full mt-1 p-2.5 border rounded-xl text-sm">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">URL / Tautan</label>
-                                    <input type="text" name="url" placeholder="index.php?page=..." value="#" required class="w-full mt-1 p-2.5 border rounded-xl text-sm">
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Induk Menu (Parent)</label>
-                                    <select name="parent_id" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white">
-                                        <option value="0">-- Menu Utama (Parent) --</option>
-                                        <?php foreach($parent_menus as$pm): ?>
-                                            <option value="<?= $pm['id'] ?>"><?= htmlspecialchars($pm['title']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Urutan</label>
-                                    <input type="number" name="sort_order" value="0" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
-                                </div>
-                                <button type="submit" class="w-full bg-teal-700 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-teal-800 transition">Simpan Menu</button>
+                                <div><label class="text-xs font-medium text-gray-500">Nama Menu</label><input type="text" name="title" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
+                                <div><label class="text-xs font-medium text-gray-500">URL</label><input type="text" name="url" value="#" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
+                                <div><label class="text-xs font-medium text-gray-500">Parent</label><select name="parent_id" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white"><option value="0">-- Utama --</option><?php foreach($parent_menus as$pm): ?><option value="<?= $pm['id'] ?>"><?= htmlspecialchars($pm['title']) ?></option><?php endforeach; ?></select></div>
+                                <div><label class="text-xs font-medium text-gray-500">Urutan</label><input type="number" name="sort_order" value="0" class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
+                                <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Simpan</button>
                             </form>
                         </div>
                         <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Struktur Navigasi Website</h3>
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-left border-collapse">
-                                    <thead>
-                                        <tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100">
-                                            <th class="py-3 px-4">Nama Menu</th>
-                                            <th class="py-3 px-4">Tipe</th>
-                                            <th class="py-3 px-4">URL</th>
-                                            <th class="py-3 px-4 text-center">Aksi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100 text-sm">
-                                        <?php foreach($all_menus as$m): ?>
-                                        <tr class="hover:bg-gray-50 transition">
-                                            <td class="py-3 px-4 font-medium text-gray-900"><?= $m['parent_id'] > 0 ? '↳ &nbsp; ' : '' ?><?= htmlspecialchars($m['title']) ?></td>
-                                            <td class="py-3 px-4"><span class="text-xs px-2 py-1 rounded-full <?= $m['parent_id'] == 0 ? 'bg-teal-50 text-teal-700' : 'bg-gray-100 text-gray-600' ?>"><?= $m['parent_id'] == 0 ? 'Utama' : 'Sub' ?></span></td>
-                                            <td class="py-3 px-4 text-gray-500 text-xs"><?= htmlspecialchars($m['url']) ?></td>
-                                            <td class="py-3 px-4 text-center"><a href="admin.php?page=menus&delete_menu=<?= $m['id'] ?>" class="text-red-500 hover:text-red-700 text-xs" onclick="return confirm('Hapus?')">Hapus</a></td>
-                                        </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
+                            <h3 class="font-semibold text-gray-800 mb-4">Daftar Menu</h3>
+                            <table class="w-full text-left border-collapse">
+                                <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-4">Nama</th><th class="py-3 px-4">URL</th><th class="py-3 px-4 text-center">Aksi</th></tr></thead>
+                                <tbody class="divide-y divide-gray-100 text-sm">
+                                    <?php foreach($all_menus as$m): ?>
+                                    <tr class="hover:bg-gray-50 transition">
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($m['title']) ?></td>
+                                        <td class="py-3 px-4 text-gray-500 text-xs"><?= htmlspecialchars($m['url']) ?></td>
+                                        <td class="py-3 px-4 text-center"><a href="admin.php?page=menus&delete_menu=<?= $m['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium" onclick="return confirm('Hapus?')">Hapus</a></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                <!-- 5. KELOLA SLIDER -->
                 <?php elseif ($page === 'slider'): ?>
-                    <?php if($msg) echo "<div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm'>$msg</div>"; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Pengaturan Slider & Indikator</h3>
+                            <h3 class="font-semibold text-gray-800 mb-4">Pengaturan Slider</h3>
                             <form method="POST" class="space-y-3">
                                 <input type="hidden" name="update_settings" value="1">
                                 <div><label class="text-xs font-medium text-gray-500">Tinggi (px)</label><input type="number" name="height" value="<?= $s_set['height'] ?? 450 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
-                                <div><label class="text-xs font-medium text-gray-500">Rounded (px)</label><input type="number" name="border_radius" value="<?= $s_set['border_radius'] ?? 20 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
+                                <div><label class="text-xs font-medium text-gray-500">Radius (px)</label><input type="number" name="border_radius" value="<?= $s_set['border_radius'] ?? 20 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
                                 <div><label class="text-xs font-medium text-gray-500">Transisi (ms)</label><input type="number" name="transition_ms" value="<?= $s_set['transition_ms'] ?? 500 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
-                                <div><label class="text-xs font-medium text-gray-500">Durasi Tampil (ms)</label><input type="number" name="interval_ms" value="<?= $s_set['interval_ms'] ?? 4000 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
-                                
-                                <hr class="my-2 border-gray-100">
-                                
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Jenis Indikator</label>
-                                    <select name="indicator_mode" class="w-full mt-1 p-2 border rounded-xl text-sm bg-white">
-                                        <option value="default" <?= ($s_set['indicator_mode'] ?? '') === 'default' ? 'selected' : '' ?>>Standar (Lingkaran)</option>
-                                        <option value="minimal" <?= ($s_set['indicator_mode'] ?? '') === 'minimal' ? 'selected' : '' ?>>Minimalis (Titik Kecil)</option>
-                                        <option value="pill" <?= ($s_set['indicator_mode'] ?? '') === 'pill' ? 'selected' : '' ?>>Garis / Pil (Bar)</option>
-                                        <option value="square" <?= ($s_set['indicator_mode'] ?? '') === 'square' ? 'selected' : '' ?>>Kotak (Square)</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Ukuran Indikator (px)</label>
-                                    <input type="number" name="indicator_size" value="<?= $s_set['indicator_size'] ?? 12 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm">
-                                </div>
-                                <div class="flex items-center gap-2 pt-2">
-                                    <input type="checkbox" name="indicator_show" value="1" id="ind_show" <?= ($s_set['indicator_show'] ?? 1) == 1 ? 'checked' : '' ?> class="w-4 h-4 text-teal-700 rounded">
-                                    <label for="ind_show" class="text-xs font-medium text-gray-700">Tampilkan Indikator Slider</label>
-                                </div>
-
-                                <button type="submit" class="w-full bg-teal-700 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-teal-800 transition mt-2">Simpan Pengaturan</button>
+                                <div><label class="text-xs font-medium text-gray-500">Interval (ms)</label><input type="number" name="interval_ms" value="<?= $s_set['interval_ms'] ?? 4000 ?>" class="w-full mt-1 p-2 border rounded-xl text-sm"></div>
+                                <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition mt-2">Simpan</button>
                             </form>
                         </div>
                         <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Upload Gambar Slider</h3>
+                            <h3 class="font-semibold text-gray-800 mb-4">Upload Slider</h3>
                             <form method="POST" enctype="multipart/form-data" class="space-y-3 mb-6">
-                                <input type="file" name="slider_image" required class="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100">
-                                <input type="text" name="title" placeholder="Judul Slider" required class="w-full p-2.5 border rounded-xl text-sm">
-                                <input type="text" name="caption" placeholder="Deskripsi Singkat (Opsional)" class="w-full p-2.5 border rounded-xl text-sm">
-                                
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500">Tampilkan di Halaman:</label>
-                                    <select name="show_on_page" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white">
-                                        <option value="home">Hanya di Beranda (Home)</option>
-                                        <option value="all">Semua Halaman</option>
-                                        <?php 
-                                        $all_pages_opt =$pdo->query("SELECT title, slug FROM posts WHERE type='page'")->fetchAll(PDO::FETCH_ASSOC);
-                                        foreach($all_pages_opt as$apo): 
-                                        ?>
-                                            <option value="<?= $apo['slug'] ?>">Halaman: <?= htmlspecialchars($apo['title']) ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-
-                                <button type="submit" class="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-gray-800 transition">Upload Gambar</button>
+                                <input type="file" name="slider_image" required class="w-full text-sm">
+                                <input type="text" name="title" placeholder="Judul" required class="w-full p-2.5 border rounded-xl text-sm">
+                                <input type="text" name="caption" placeholder="Caption" class="w-full p-2.5 border rounded-xl text-sm">
+                                <select name="show_on_page" class="w-full p-2.5 border rounded-xl text-sm bg-white"><option value="home">Hanya Beranda</option><option value="all">Semua Halaman</option></select>
+                                <button type="submit" class="bg-gray-900 text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-gray-800 transition">Upload</button>
                             </form>
-                            <div class="border-t pt-4">
-                                <h4 class="text-xs font-semibold text-gray-400 uppercase mb-3">Daftar Slider</h4>
-                                <div class="space-y-2">
-                                    <?php foreach($sliders as$s): ?>
-                                    <div class="flex items-center justify-between p-3 border rounded-xl">
-                                        <div class="flex items-center gap-3">
-                                            <img src="<?= $s['image_path'] ?>" class="w-16 h-10 object-cover rounded-lg">
-                                            <div>
-                                                <span class="text-sm font-medium text-gray-800 block"><?= htmlspecialchars($s['title']) ?></span>
-                                                <span class="text-[11px] text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md">Target: <?= htmlspecialchars($s['show_on_page'] ?? 'home') ?></span>
-                                            </div>
-                                        </div>
-                                        <a href="admin.php?page=slider&delete_slider=<?= $s['id'] ?>" class="text-red-500 hover:text-red-700 text-sm" onclick="return confirm('Hapus?')">Hapus</a>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
                         </div>
                     </div>
 
-                <!-- 6. EDIT TEMA -->
                 <?php elseif ($page === 'theme'): ?>
-                    <?php if($msg_setting) echo "<div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm'>$msg_setting</div>"; ?>
+                    <?php if($msg_setting): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg_setting) ?></div><?php endif; ?>
                     <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm max-w-xl">
-                        <h3 class="font-semibold text-gray-800 mb-4">Pengaturan Tema Glassmorphism</h3>
+                        <h3 class="font-semibold text-gray-800 mb-4">Tema Glassmorphism</h3>
                         <form method="POST" class="space-y-4">
                             <div class="grid grid-cols-2 gap-4">
                                 <div><label class="text-xs font-medium text-gray-500">Warna BG 1</label><input type="color" name="bg_color_1" value="<?= $theme['bg_color_1'] ?? '#4A00E0' ?>" class="w-full h-10 mt-1 cursor-pointer rounded-xl border p-1"></div>
                                 <div><label class="text-xs font-medium text-gray-500">Warna BG 2</label><input type="color" name="bg_color_2" value="<?= $theme['bg_color_2'] ?? '#8E2DE2' ?>" class="w-full h-10 mt-1 cursor-pointer rounded-xl border p-1"></div>
                             </div>
                             <div><label class="text-xs font-medium text-gray-500">Warna Teks</label><input type="color" name="text_color" value="<?= $theme['text_color'] ?? '#ffffff' ?>" class="w-full h-10 mt-1 cursor-pointer rounded-xl border p-1"></div>
-                            <div><label class="text-xs font-medium text-gray-500">Glass Opacity (0.0 - 1.0)</label><input type="range" name="glass_opacity" min="0" max="1" step="0.05" value="<?= $theme['glass_opacity'] ?? 0.15 ?>" class="w-full mt-2"></div>
-                            <div><label class="text-xs font-medium text-gray-500">Efek Blur (px)</label><input type="range" name="blur_px" min="0" max="30" value="<?= $theme['blur_px'] ?? 15 ?>" class="w-full mt-2"></div>
-                            <button type="submit" class="w-full bg-teal-700 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-teal-800 transition">Simpan Tema</button>
+                            <div><label class="text-xs font-medium text-gray-500">Opacity</label><input type="range" name="glass_opacity" min="0" max="1" step="0.05" value="<?= $theme['glass_opacity'] ?? 0.15 ?>" class="w-full mt-2"></div>
+                            <div><label class="text-xs font-medium text-gray-500">Blur</label><input type="range" name="blur_px" min="0" max="30" value="<?= $theme['blur_px'] ?? 15 ?>" class="w-full mt-2"></div>
+                            <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Simpan Tema</button>
                         </form>
                     </div>
                 <?php endif; ?>
-
             </main>
         </div>
     </div>
 
+    <script>
+        function toggleSubmenu(submenuId, arrowId) {
+            const submenu = document.getElementById(submenuId);
+            const arrow = document.getElementById(arrowId);
+            if (submenu.classList.contains('hidden')) {
+                submenu.classList.remove('hidden');
+                arrow.classList.add('rotate-180');
+            } else {
+                submenu.classList.add('hidden');
+                arrow.classList.remove('rotate-180');
+            }
+        }
+    </script>
 </body>
 </html>

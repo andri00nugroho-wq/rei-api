@@ -15,8 +15,8 @@ $pdo->query("INSERT INTO daily_visitors (visit_date, views) VALUES ('$today', 1)
 $requested_page = $_GET['page'] ?? null;
 $current_page_data = null;
 
-if ($requested_page && $requested_page !== 'admin') {
-    $stmt = $pdo->prepare("SELECT * FROM posts WHERE slug = ? AND type = 'page'");
+if ($requested_page && $requested_page !== 'admin' && $requested_page !== 'cabang') {
+    $stmt = $pdo->prepare("SELECT * FROM posts WHERE slug = ?");
     $stmt->execute([$requested_page]);
     $current_page_data = $stmt->fetch(PDO::FETCH_ASSOC);
 }
@@ -24,6 +24,13 @@ if ($requested_page && $requested_page !== 'admin') {
 $posts = $pdo->query("SELECT * FROM posts WHERE type='post' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
 $theme = $pdo->query("SELECT * FROM theme_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
 $s_set = $pdo->query("SELECT * FROM slider_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
+
+// Ambil data cabang toko untuk ditampilkan di website
+try {
+    $branches_list = $pdo->query("SELECT * FROM branches ORDER BY branch_number ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $branches_list = [];
+}
 
 // Ambil slider berdasarkan halaman aktif
 $current_slug = $requested_page ?? 'home';
@@ -56,6 +63,7 @@ foreach ($menu_children as $child) {
     
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
         :root { 
@@ -102,13 +110,13 @@ foreach ($menu_children as $child) {
         
         #bottom-nav { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); width: max-content; padding: 12px 30px; border-radius: 50px; display: flex; gap: 20px; z-index: 1000; transition: bottom 0.4s ease-in-out; }
         
-        .content-container { max-width: 800px; margin: 120px auto 100px; padding: 0 20px; }
+        .content-container { max-width: 1000px; margin: 120px auto 100px; padding: 0 20px; }
         .post-card { padding: 30px; border-radius: 20px; margin-bottom: 30px; }
         .post-date { font-size: 0.9em; opacity: 0.8; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 15px;}
         
         .slider-wrapper { margin-top: 100px; max-width: 1000px; margin-left: auto; margin-right: auto; padding: 0 20px;}
         .slider { border-radius: <?= $s_radius ?>px !important; box-shadow: 0 8px 32px 0 rgba(0,0,0,0.3); background-color: transparent !important; }
-        .slider .slides { border-radius: <?= $s_radius ?>px !important; overflow: hidden !important; -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-mask-image: -webkit-radial-gradient(white, black); }
+        .slider .slides { border-radius: <?= $s_radius ?>px !important; overflow: hidden !important; -webkit-transform: translateZ(0); transform: translateZ(0); }
         .slider .slides li img { border-radius: <?= $s_radius ?>px !important; }
         .slider .caption { background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(5px); padding: 20px !important; border-radius: 15px; display: inline-block; }
 
@@ -116,40 +124,24 @@ foreach ($menu_children as $child) {
             .slider .indicators { display: none !important; }
         <?php else: ?>
             .slider .indicators .indicator-item {
-                width: <?= $ind_size ?>px !important;
-                height: <?= $ind_size ?>px !important;
-                margin: 0 6px !important;
-                background-color: rgba(255, 255, 255, 0.5) !important;
-                border: 2px solid rgba(255, 255, 255, 0.8) !important;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                width: <?= $ind_size ?>px !important; height: <?= $ind_size ?>px !important;
+                margin: 0 6px !important; background-color: rgba(255, 255, 255, 0.5) !important;
+                border: 2px solid rgba(255, 255, 255, 0.8) !important; box-shadow: 0 2px 5px rgba(0,0,0,0.3);
                 transition: all 0.3s ease;
             }
             .slider .indicators .indicator-item.active { background-color: #ffffff !important; }
-
-            <?php if ($ind_mode === 'minimal'): ?>
-                .slider .indicators .indicator-item { border: none !important; }
-            <?php elseif ($ind_mode === 'pill'): ?>
-                .slider .indicators .indicator-item {
-                    width: <?= $ind_size * 2.5 ?>px !important;
-                    height: <?= max(6, $ind_size * 0.4) ?>px !important;
-                    border-radius: 4px !important;
-                    border: none !important;
-                }
-            <?php elseif ($ind_mode === 'square'): ?>
-                .slider .indicators .indicator-item { border-radius: 4px !important; }
-            <?php endif; ?>
         <?php endif; ?>
     </style>
 </head>
 <body>
 
     <nav id="top-nav" class="glass">
-        <a href="index.php" style="text-decoration:none; display: flex; align-items: center;">
-            <img src="logo-rei.png" alt="Logo Raja Emas Indonesia" style="max-height: 32px; width: auto; filter: brightness(1.3) contrast(1.1); drop-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+        <a href="./" style="text-decoration:none; display: flex; align-items: center;">
+            <img src="logo-rei.png" alt="Logo Raja Emas Indonesia" style="max-height: 32px; width: auto; filter: brightness(1.3) contrast(1.1);">
         </a>
         
         <div class="nav-links-container">
-            <a href="index.php" class="nav-link">Home</a>
+            <a href="./" class="nav-link">Home</a>
             <?php foreach($menu_parents as $parent): ?>
                 <?php $has_children = isset($grouped_submenus[$parent['id']]); ?>
                 <?php if($has_children): ?>
@@ -167,15 +159,60 @@ foreach ($menu_children as $child) {
                     <a href="<?= htmlspecialchars($parent['url']) ?>" class="nav-link"><?= htmlspecialchars($parent['title']) ?></a>
                 <?php endif; ?>
             <?php endforeach; ?>
+            <a href="cabang" class="nav-link">Cabang Toko</a>
         </div>
 
         <a href="admin.php" class="nav-link" style="background: rgba(255,255,255,0.2);"><i class="material-icons" style="font-size: 16px;">dashboard</i> Admin</a>
     </nav>
 
-    <?php if ($current_page_data): ?>
-        <?php if (!empty($current_page_data['custom_css'])): ?>
-            <style><?= $current_page_data['custom_css'] ?></style>
-        <?php endif; ?>
+    <!-- Jika halaman yang diminta adalah khusus 'cabang' -->
+    <?php if ($requested_page === 'cabang'): ?>
+        <div class="content-container">
+            <div class="post-card glass">
+                <h1 style="margin-top: 0; font-size: 2rem; margin-bottom: 20px;">Daftar Cabang Toko</h1>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <?php if (empty($branches_list)): ?>
+                        <p style="opacity: 0.8;">Belum ada cabang toko yang ditambahkan.</p>
+                    <?php else: ?>
+                        <?php foreach($branches_list as $b): ?>
+                        <div style="background: white; color: #111; border: 2px solid #3b1c32; border-radius: 30px; padding: 24px; display: flex; flex-direction: column; justify-content: between; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                    <div>
+                                        <span style="font-size: 1.5rem; font-weight: bold;"><?= htmlspecialchars($b['branch_number']) ?></span>
+                                        <h3 style="font-size: 1.25rem; font-weight: bold; margin: 4px 0 0 0; line-height: 1.4;"><?= htmlspecialchars($b['title']) ?></h3>
+                                    </div>
+                                </div>
+                                <p style="font-size: 0.9rem; color: #4b5563; margin-bottom: 16px; line-height: 1.5;"><?= nl2br(htmlspecialchars($b['address'])) ?></p>
+                                <p style="font-size: 0.9rem; font-weight: 600; color: #3b1c32; margin-bottom: 12px; text-decoration: underline;">
+                                    Hp & Whatsapp: <a href="https://wa.me/<?= preg_replace('/[^0-9]/', '', $b['phone']) ?>" target="_blank" style="color: #3b1c32;"><?= htmlspecialchars($b['phone']) ?></a>
+                                </p>
+                                <p style="font-size: 0.9rem; color: #1f2937; margin: 4px 0;">Buka : <?= htmlspecialchars($b['hours']) ?></p>
+                                <p style="font-size: 0.9rem; color: #1f2937; margin: 4px 0 16px 0;">Catatan: <?= htmlspecialchars($b['notes']) ?></p>
+
+                                <?php if(!empty($b['map_embed_url'])): ?>
+                                <div style="border-radius: 16px; overflow: hidden; height: 160px; border: 1px solid #e5e7eb; margin-bottom: 16px;">
+                                    <iframe src="<?= htmlspecialchars($b['map_embed_url']) ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link']) : '#' ?>" target="_blank" style="background: #3b1c32; color: white; padding: 12px; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                Menuju Lokasi <span class="material-icons" style="font-size: 16px;">north_east</span>
+                            </a>
+                        </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+                <div style="margin-top: 30px;">
+                    <a href="./" class="nav-link" style="display:inline-block; background:rgba(255,255,255,0.2); padding: 8px 20px; border-radius:10px;">&larr; Kembali ke Beranda</a>
+                </div>
+            </div>
+        </div>
+
+    <!-- Tampilan Standar Beranda / Halaman Lain -->
+    <?php elseif ($current_page_data): ?>
+        <?php if (!empty($current_page_data['custom_css'])): ?><style><?= $current_page_data['custom_css'] ?></style><?php endif; ?>
 
         <?php if(count($sliders) > 0): ?>
         <div class="slider-wrapper">
@@ -186,9 +223,7 @@ foreach ($menu_children as $child) {
                         <img src="<?= $slide['image_path'] ?>" alt="Slider Image">
                         <div class="caption center-align">
                             <h3><?= htmlspecialchars($slide['title']) ?></h3>
-                            <?php if(!empty($slide['caption'])): ?>
-                                <h5 class="light grey-text text-lighten-3"><?= htmlspecialchars($slide['caption']) ?></h5>
-                            <?php endif; ?>
+                            <?php if(!empty($slide['caption'])): ?><h5 class="light grey-text text-lighten-3"><?= htmlspecialchars($slide['caption']) ?></h5><?php endif; ?>
                         </div>
                     </li>
                     <?php endforeach; ?>
@@ -198,9 +233,7 @@ foreach ($menu_children as $child) {
         <?php endif; ?>
 
         <?php if (!empty($current_page_data['custom_html'])): ?>
-            <div style="margin-top: 100px;">
-                <?= $current_page_data['custom_html'] ?>
-            </div>
+            <div style="margin-top: 100px;"><?= $current_page_data['custom_html'] ?></div>
         <?php else: ?>
             <div class="content-container">
                 <div class="post-card glass">
@@ -208,24 +241,16 @@ foreach ($menu_children as $child) {
                     <div class="post-date">Dipublikasikan: <?= date('d M Y', strtotime($current_page_data['created_at'])) ?></div>
                     
                     <?php if (!empty($current_page_data['featured_image'])): ?>
-                        <div style="margin: 20px 0;">
-                            <img src="<?= $current_page_data['featured_image'] ?>" alt="Featured Image" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                        </div>
+                        <div style="margin: 20px 0;"><img src="<?= $current_page_data['featured_image'] ?>" alt="Featured Image" style="width: 100%; max-height: 400px; object-fit: cover; border-radius: 12px;"></div>
                     <?php endif; ?>
 
-                    <div class="post-content" style="margin-top: 20px; line-height: 1.6;">
-                        <?= $current_page_data['content'] ?>
-                    </div>
-                    <div style="margin-top: 30px;">
-                        <a href="index.php" class="nav-link" style="display:inline-block; background:rgba(255,255,255,0.2); padding: 8px 20px; border-radius:10px;">&larr; Kembali ke Beranda</a>
-                    </div>
+                    <div class="post-content" style="margin-top: 20px; line-height: 1.6;"><?= $current_page_data['content'] ?></div>
+                    <div style="margin-top: 30px;"><a href="./" class="nav-link" style="display:inline-block; background:rgba(255,255,255,0.2); padding: 8px 20px; border-radius:10px;">&larr; Kembali ke Beranda</a></div>
                 </div>
             </div>
         <?php endif; ?>
 
-        <?php if (!empty($current_page_data['custom_js'])): ?>
-            <script><?= $current_page_data['custom_js'] ?></script>
-        <?php endif; ?>
+        <?php if (!empty($current_page_data['custom_js'])): ?><script><?= $current_page_data['custom_js'] ?></script><?php endif; ?>
 
     <?php else: ?>
         <?php if(count($sliders) > 0): ?>
@@ -237,9 +262,7 @@ foreach ($menu_children as $child) {
                         <img src="<?= $slide['image_path'] ?>" alt="Slider Image">
                         <div class="caption center-align">
                             <h3><?= htmlspecialchars($slide['title']) ?></h3>
-                            <?php if(!empty($slide['caption'])): ?>
-                                <h5 class="light grey-text text-lighten-3"><?= htmlspecialchars($slide['caption']) ?></h5>
-                            <?php endif; ?>
+                            <?php if(!empty($slide['caption'])): ?><h5 class="light grey-text text-lighten-3"><?= htmlspecialchars($slide['caption']) ?></h5><?php endif; ?>
                         </div>
                     </li>
                     <?php endforeach; ?>
@@ -257,28 +280,57 @@ foreach ($menu_children as $child) {
                     <div class="post-date">Dipublikasikan: <?= date('d M Y', strtotime($post['created_at'])) ?></div>
                     
                     <?php if (!empty($post['featured_image'])): ?>
-                        <div style="margin: 15px 0;">
-                            <img src="<?= $post['featured_image'] ?>" alt="Featured Image" style="width: 100%; max-height: 350px; object-fit: cover; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-                        </div>
+                        <div style="margin: 15px 0;"><img src="<?= $post['featured_image'] ?>" alt="Featured Image" style="width: 100%; max-height: 350px; object-fit: cover; border-radius: 12px;"></div>
                     <?php endif; ?>
 
-                    <div class="post-content" style="margin-top: 15px;">
-                        <?= $post['content'] ?>
-                    </div>
+                    <div class="post-content" style="margin-top: 15px;"><?= $post['content'] ?></div>
                 </div>
             <?php endforeach; ?>
-            
-            <?php if (count($posts) === 0 && count($sliders) === 0): ?>
-                <div class="post-card glass" style="text-align:center;">
-                    <h3>Belum ada konten</h3>
-                    <p>Silakan buat artikel atau halaman baru melalui panel admin.</p>
+
+            <!-- Bagian Tampilan Daftar Cabang Toko di Beranda (Opsional / Bisa diakses via menu) -->
+            <div class="post-card glass" style="margin-top: 40px;">
+                <h2 style="margin-top: 0; font-size: 1.8rem; margin-bottom: 24px;">Daftar Cabang Toko Resmi</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <?php if (empty($branches_list)): ?>
+                        <p style="opacity: 0.8;">Belum ada cabang toko yang tersedia.</p>
+                    <?php else: ?>
+                        <?php foreach($branches_list as $b): ?>
+                        <div style="background: white; color: #111; border: 2px solid #3b1c32; border-radius: 30px; padding: 24px; display: flex; flex-direction: column; justify-content: between; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                    <div>
+                                        <span style="font-size: 1.5rem; font-weight: bold;"><?= htmlspecialchars($b['branch_number']) ?></span>
+                                        <h3 style="font-size: 1.25rem; font-weight: bold; margin: 4px 0 0 0; line-height: 1.4;"><?= htmlspecialchars($b['title']) ?></h3>
+                                    </div>
+                                </div>
+                                <p style="font-size: 0.9rem; color: #4b5563; margin-bottom: 16px; line-height: 1.5;"><?= nl2br(htmlspecialchars($b['address'])) ?></p>
+                                <p style="font-size: 0.9rem; font-weight: 600; color: #3b1c32; margin-bottom: 12px; text-decoration: underline;">
+                                    Hp & Whatsapp: <a href="https://wa.me/<?= preg_replace('/[^0-9]/', '', $b['phone']) ?>" target="_blank" style="color: #3b1c32;"><?= htmlspecialchars($b['phone']) ?></a>
+                                </p>
+                                <p style="font-size: 0.9rem; color: #1f2937; margin: 4px 0;">Buka : <?= htmlspecialchars($b['hours']) ?></p>
+                                <p style="font-size: 0.9rem; color: #1f2937; margin: 4px 0 16px 0;">Catatan: <?= htmlspecialchars($b['notes']) ?></p>
+
+                                <?php if(!empty($b['map_embed_url'])): ?>
+                                <div style="border-radius: 16px; overflow: hidden; height: 160px; border: 1px solid #e5e7eb; margin-bottom: 16px;">
+                                    <iframe src="<?= htmlspecialchars($b['map_embed_url']) ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link']) : '#' ?>" target="_blank" style="background: #3b1c32; color: white; padding: 12px; border-radius: 16px; text-align: center; text-decoration: none; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                Menuju Lokasi <span class="material-icons" style="font-size: 16px;">north_east</span>
+                            </a>
+                        </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 </div>
-            <?php endif; ?>
+            </div>
         </div>
     <?php endif; ?>
 
     <nav id="bottom-nav" class="glass">
-        <a href="index.php" class="nav-link"><i class="material-icons" style="font-size: 18px;">home</i> Home</a>
+        <a href="./" class="nav-link"><i class="material-icons" style="font-size: 18px;">home</i> Home</a>
+        <a href="cabang" class="nav-link"><i class="material-icons" style="font-size: 18px;">storefront</i> Cabang</a>
         <a href="admin.php" class="nav-link"><i class="material-icons" style="font-size: 18px;">dashboard</i> Admin</a>
         <a href="#" onclick="window.scrollTo({top: 0, behavior: 'smooth'}); return false;" class="nav-link"><i class="material-icons" style="font-size: 18px;">arrow_upward</i> Top</a>
     </nav>

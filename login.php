@@ -26,25 +26,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <!DOCTYPE html>
 <html lang="id">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - REI-CMS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f4f4f4; }
-        .login-box { background: white; padding: 20px 30px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); width: 100%; max-width: 300px; }
-        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #4A00E0; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        .error { color: red; font-size: 0.9em; margin-bottom: 10px; }
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Efek perspektif 3D untuk pembungkus logo */
+        .coin-container {
+            perspective: 1000px;
+        }
+
+        /* Animasi Koin Berputar (Kiri-Kanan / Sumbu Y) */
+        @keyframes coin-flip {
+            0% {
+                transform: rotateY(0deg);
+            }
+            50% {
+                transform: rotateY(180deg);
+            }
+            100% {
+                transform: rotateY(360deg);
+            }
+        }
+
+        .animate-coin {
+            animation: coin-flip 3s infinite linear; /* Durasi 3 detik per putaran */
+            transform-style: preserve-3d;
+        }
     </style>
 </head>
-<body>
-    <div class="login-box">
-        <h2>Login Admin</h2>
-        <?php if ($error) echo "<div class='error'>$error</div>"; ?>
-        <form method="POST">
-            <input type="text" name="username" placeholder="Username" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit">Masuk</button>
+<body class="flex justify-center items-center h-screen m-0 bg-gray-100">
+    <div class="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 w-full max-w-sm">
+        <!-- Logo dengan animasi koin berputar kiri-kanan -->
+        <div class="flex items-center justify-center mb-6 coin-container">
+            <img src="logo-rei-2.png" alt="Logo" class="max-h-24 w-auto object-contain animate-coin">
+        </div>
+
+        <?php if ($error): ?>
+            <div class="mb-4 p-3 bg-red-50 text-red-600 rounded-xl text-xs font-medium text-center"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
+
+        <form method="POST" class="space-y-4">
+            <div>
+                <input type="text" name="username" placeholder="Username" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition">
+            </div>
+            <div>
+                <input type="password" name="password" placeholder="Password" required class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 transition">
+            </div>
+            <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-black text-white text-sm font-medium rounded-xl hover:opacity-95 transition shadow-md">Masuk</button>
         </form>
-        <p style="text-align: center; font-size: 0.9em;"><a href="index.php">Kembali ke Web</a></p>
+        <p class="text-center mt-6 text-xs text-gray-500"><a href="index.php" class="hover:text-purple-600 transition">← Kembali ke Web</a></p>
     </div>
 </body>
 </html>
