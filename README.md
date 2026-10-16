@@ -290,3 +290,195 @@ GitHub: https://github.com/andri00nugroho-wq/rei-cms-v1-admin
 
 Setelah mengubah kode, jalankan pengujian lokal sebelum melakukan commit dan push ke GitHub.
 
+
+
+\## 11. Database SQL
+
+
+
+REI CMS menggunakan MySQL/MariaDB untuk menyimpan data website, akun admin, artikel, halaman, menu, slider, dan cabang toko.
+
+
+
+\### A. Membuat database
+
+
+
+1\. Jalankan Apache dan MySQL melalui Laragon.
+
+2\. Buka phpMyAdmin: `http://localhost/phpmyadmin/`.
+
+3\. Buat database baru bernama `rei\_cms\_v1`.
+
+4\. Gunakan collation `utf8mb4\_unicode\_ci` jika tersedia.
+
+
+
+Alternatif melalui SQL:
+
+
+
+```sql
+
+CREATE DATABASE rei\_cms\_v1
+
+CHARACTER SET utf8mb4
+
+COLLATE utf8mb4\_unicode\_ci;
+
+```
+
+
+
+\### B. Mengimpor database
+
+
+
+Jika tersedia file dump database yang sudah diperiksa dan aman:
+
+
+
+1\. Buka phpMyAdmin.
+
+2\. Pilih database `rei\_cms\_v1`.
+
+3\. Klik tab \*\*Import\*\*.
+
+4\. Pilih file `.sql` dari komputer.
+
+5\. Klik \*\*Import\*\* atau \*\*Go\*\*.
+
+6\. Pastikan tabel berhasil dibuat.
+
+
+
+Jangan mengunggah dump yang berisi password, token, atau data pribadi ke repository publik.
+
+
+
+\### C. Konfigurasi koneksi PHP
+
+
+
+Periksa file konfigurasi database pada project, misalnya `config.php`.
+
+
+
+Sesuaikan host, nama database, username, dan password dengan konfigurasi MySQL lokal.
+
+
+
+Contoh konfigurasi PDO:
+
+
+
+```php
+
+<?php
+
+$host = '127.0.0.1';
+
+$dbname = 'rei\_cms\_v1';
+
+$username = 'root';
+
+$password = '';
+
+
+
+$dsn = "mysql:host={$host};dbname={$dbname};charset=utf8mb4";
+
+
+
+$options = \[
+
+&#x20;   PDO::ATTR\_ERRMODE => PDO::ERRMODE\_EXCEPTION,
+
+&#x20;   PDO::ATTR\_DEFAULT\_FETCH\_MODE => PDO::FETCH\_ASSOC,
+
+&#x20;   PDO::ATTR\_EMULATE\_PREPARES => false,
+
+];
+
+
+
+$pdo = new PDO($dsn, $username, $password, $options);
+
+```
+
+
+
+Contoh tersebut hanya untuk referensi. Sesuaikan dengan struktur konfigurasi project dan jangan menimpa konfigurasi yang sudah berfungsi tanpa membuat cadangan.
+
+
+
+\### D. Memeriksa tabel
+
+
+
+Setelah impor, jalankan di phpMyAdmin:
+
+
+
+```sql
+
+SHOW TABLES;
+
+```
+
+
+
+Untuk melihat struktur tabel tertentu:
+
+
+
+```sql
+
+DESCRIBE branches;
+
+```
+
+
+
+Perintah kedua hanya berlaku jika tabel `branches` tersedia.
+
+
+
+\### E. Backup database
+
+
+
+Untuk membuat cadangan:
+
+
+
+1\. Buka phpMyAdmin.
+
+2\. Pilih database `rei\_cms\_v1`.
+
+3\. Klik \*\*Export\*\*.
+
+4\. Pilih format SQL.
+
+5\. Simpan file hasil ekspor di lokasi aman di luar folder publik website.
+
+
+
+\### F. Troubleshooting SQL
+
+
+
+\- \*\*Access denied:\*\* periksa username, password, dan hak akses database.
+
+\- \*\*Unknown database:\*\* pastikan database sudah dibuat.
+
+\- \*\*Table doesn't exist:\*\* periksa apakah file SQL sudah diimpor dengan benar.
+
+\- \*\*Duplicate entry:\*\* periksa data yang sudah ada sebelum mengimpor ulang.
+
+\- \*\*Unknown column:\*\* sesuaikan struktur tabel dengan kode aplikasi.
+
+
+
+Jangan menjalankan `DROP DATABASE` atau menghapus tabel produksi tanpa backup dan konfirmasi yang jelas.
+
