@@ -455,10 +455,10 @@ foreach($chart_data as $cd) {
                                     <label class="text-xs font-medium text-gray-500">Catatan Khusus</label>
                                     <input type="text" name="notes" value="<?= htmlspecialchars($edit_branch_data['notes'] ?? '') ?>" placeholder="BUKA SETIAP HARI" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
-                                <div>
+                                <!-- <div>
                                     <label class="text-xs font-medium text-gray-500">Link URL Embed Google Maps (src iframe saja)</label>
                                     <textarea name="map_embed_url" rows="2" placeholder="https://www.google.com/maps/embed?pb=..." class="w-full mt-1 p-2.5 border rounded-xl text-xs font-mono"><?= htmlspecialchars($edit_branch_data['map_embed_url'] ?? '') ?></textarea>
-                                </div>
+                                </div> -->
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Link Tombol "Menuju Lokasi"</label>
                                     <input type="text" name="map_link" value="<?= htmlspecialchars($edit_branch_data['map_link'] ?? '') ?>" placeholder="https://maps.google.com/?q=..." class="w-full mt-1 p-2.5 border rounded-xl text-sm">
@@ -499,17 +499,7 @@ foreach($chart_data as $cd) {
                                             <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars($b['hours']) ?></p>
                                             <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars($b['notes']) ?></p>
 
-                                            <?php if(!empty($b['map_embed_url']) && str_contains($b['map_embed_url'], 'embed')): ?>
-                                            <div class="rounded-xl overflow-hidden h-40 border border-gray-200 mb-4 relative">
-                                                <iframe src="<?= htmlspecialchars($b['map_embed_url']) ?>" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy"></iframe>
-                                            </div>
-                                            <?php else: ?>
-                                            <div class="rounded-xl overflow-hidden h-40 border border-dashed border-gray-300 mb-4 flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
-                                                <span class="material-icons text-gray-400 mb-1">map</span>
-                                                <span class="text-xs text-gray-500 font-medium">Link Peta Belum Valid / Salah</span>
-                                                <span class="text-[10px] text-gray-400 mt-0.5">Gunakan URL Embed dari Google Maps (src iframe)</span>
-                                            </div>
-                                            <?php endif; ?>
+                                           
                                         </div>
                                         <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link']) : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
                                             Menuju Lokasi <span class="material-icons text-sm">north_east</span>
@@ -596,7 +586,7 @@ foreach($chart_data as $cd) {
                                         <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title']) ?></td>
                                         <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= $p['slug'] ?></td>
                                         <td class="py-3 px-4 text-center space-x-2">
-                                            <a href="<?= $p['slug'] ?>" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                            <a href="http://localhost/rei/" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
                                                 <span class="material-icons text-xs">visibility</span> Lihat
                                             </a>
                                             <a href="edit-page.php?id=<?= $p['id'] ?>" class="text-amber-600 hover:text-amber-800 text-xs font-medium inline-flex items-center gap-0.5">
