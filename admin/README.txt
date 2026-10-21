@@ -8,7 +8,7 @@ INSTALASI
    C:\laragon\www\rei\api
 
 3. Buka:
-   https://rei-api.rajaemas.dev/rei/admin/login.php
+   http://localhost/rei/admin/login.php
 
 4. Login dengan akun admin yang sudah digunakan oleh api/auth.php.
 

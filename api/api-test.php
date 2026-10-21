@@ -5,6 +5,7 @@ declare(strict_types=1);
 const USERS_TABLE  = '';
 const API_TOKEN    = '';
 const LOGO_URL     = 'https://rajaemasindonesia.co.id/wp-content/uploads/2025/01/2-Photoroom.png';
+
 const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 300;
 

@@ -40,7 +40,7 @@ Sistem manajemen konten Raja Emas Indonesia berbasis PHP dan MySQL.
 
 
 
-&#x20;  `https://rei-api.rajaemas.dev/rei/`
+&#x20;  `http://localhost/rei/`
 
 
 
@@ -56,7 +56,7 @@ Buka alamat:
 
 
 
-`https://rei-api.rajaemas.dev/rei/admin/`
+`http://localhost/rei/admin/`
 
 
 
@@ -134,7 +134,7 @@ Contoh alamat lokal:
 
 
 
-`https://rei-api.rajaemas.dev/rei/api/health.php`
+`http://localhost/rei/api/health.php`
 
 
 
@@ -202,7 +202,7 @@ Contoh pemeriksaan endpoint health:
 
 ```bash
 
-curl -i https://rei-api.rajaemas.dev/rei/api/health.php
+curl -i http://localhost/rei/api/health.php
 
 ```
 
@@ -306,7 +306,7 @@ REI CMS menggunakan MySQL/MariaDB untuk menyimpan data website, akun admin, arti
 
 1\. Jalankan Apache dan MySQL melalui Laragon.
 
-2\. Buka phpMyAdmin: `https://rei-api.rajaemas.dev/phpmyadmin/`.
+2\. Buka phpMyAdmin: `http://localhost/phpmyadmin/`.
 
 3\. Buat database baru bernama `rei\_cms\_v1`.
 
