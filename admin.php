@@ -659,7 +659,7 @@ foreach($chart_data as $cd) {
                                         <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title']) ?></td>
                                         <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= $p['slug'] ?></td>
                                         <td class="py-3 px-4 text-center space-x-2">
-                                            <a href="http://localhost/rei/" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                            <a href="https://rei-api.rajaemas.dev/rei/" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
                                                 <span class="material-icons text-xs">visibility</span> Lihat
                                             </a>
                                             <a href="edit-page.php?id=<?= $p['id'] ?>" class="text-amber-600 hover:text-amber-800 text-xs font-medium inline-flex items-center gap-0.5">

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 const USERS_TABLE  = '';
 const API_TOKEN    = '';
-const LOGO_URL     = 'http://localhost/rei/logo-rei.png';
+const LOGO_URL     = 'https://rei-api.rajaemas.devrei/logo-rei.png';
 const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 300;
 
@@ -466,6 +466,7 @@ Accept: application/json</pre></div>
   </section>
 
   <hr class="my-12 border-slate-200">
+
 
   <section id="coba-api" data-spy class="doc">
     <h2 class="h2">Coba API</h2>
