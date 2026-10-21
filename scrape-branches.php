@@ -4,28 +4,45 @@ declare(strict_types=1);
 /**
  * Scraper dan sinkronisasi cabang Raja Emas Indonesia.
  *
- * Jalankan:
- * php scrape-branches.php
+ * CLI:
+ *   php scrape-branches.php
  *
- * Sumber:
- * https://rajaemasindonesia.co.id/
+ * Dari halaman admin (setelah cek login + CSRF):
+ *   require_once __DIR__ . '/scrape-branches.php';
+ *   $summary = runSync();   // array ringkasan, tidak mencetak apa pun
+ *
+ * Alur: ambil HTML langsung dari SOURCE_URL -> parse -> tulis ke DB.
+ * Tidak ada file debug. Cabang di DB yang sudah tidak ada di website
+ * akan dihapus (lihat pengaman di bagian 12).
  */
 
 // =====================================================
 // 1. KONFIGURASI
 // =====================================================
 
-const SOURCE_URL = 'https://rajaemasindonesia.co.id/';
-const DEBUG_FILE = __DIR__ . '/debug-branches.html';
+const SOURCE_URL = 'https://rajaemasindonesia.co.id/#lokasi';
 
 // Sesuaikan dengan konfigurasi database Laragon Anda.
 const DB_HOST = '127.0.0.1';
 const DB_PORT = '3306';
 const DB_NAME = 'rei_cms_v1';
-const DB_USER = 'admin_cms';
+const DB_USER = 'radmin_cms';
 const DB_PASS = 'M@juterusrajaemas';
 
 const DB_TABLE = 'branches';
+
+// Hapus cabang di DB yang sudah tidak ada di website.
+const DELETE_MISSING = true;
+
+// Pengaman: jika hasil parsing kurang dari rasio ini dibanding jumlah
+// cabang di DB (dan DB berisi minimal DELETE_GUARD_MIN_ROWS baris),
+// penghapusan dibatalkan karena kemungkinan besar parsing/halaman gagal.
+const DELETE_MIN_KEEP_RATIO = 0.5;
+const DELETE_GUARD_MIN_ROWS = 4;
+
+// Kolom yang TIDAK boleh dikosongkan jika hasil scraping kosong.
+// Kolom lain (phone, hours, notes) mengikuti website, termasuk jika dihapus di sana.
+const PRESERVE_WHEN_EMPTY = ['title', 'address', 'map_embed_url', 'map_link'];
 
 // =====================================================
 // 2. KONEKSI DATABASE
@@ -48,10 +65,10 @@ function connectDatabase(): PDO
 }
 
 // =====================================================
-// 3. AMBIL HTML DARI WEBSITE
+// 3. AMBIL HTML LANGSUNG DARI WEBSITE
 // =====================================================
 
-function fetchWebsite(string $url): string
+function fetchWebsite(string $url, callable $log): string
 {
     if (!function_exists('curl_init')) {
         throw new RuntimeException(
@@ -59,7 +76,14 @@ function fetchWebsite(string $url): string
         );
     }
 
-    $ch = curl_init($url);
+    // Fragment (#lokasi) tidak pernah dikirim ke server, jadi dibuang.
+    $cleanUrl = preg_replace('/#.*$/', '', $url) ?? $url;
+
+    // Cache-buster agar tidak mengambil versi cache dari CDN/plugin cache.
+    $separator = str_contains($cleanUrl, '?') ? '&' : '?';
+    $requestUrl = $cleanUrl . $separator . '_=' . time();
+
+    $ch = curl_init($requestUrl);
 
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -72,7 +96,8 @@ function fetchWebsite(string $url): string
         CURLOPT_HTTPHEADER     => [
             'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language: id-ID,id;q=0.9,en;q=0.8',
-            'Cache-Control: no-cache',
+            'Cache-Control: no-cache, no-store, max-age=0',
+            'Pragma: no-cache',
         ],
     ]);
 
@@ -83,26 +108,19 @@ function fetchWebsite(string $url): string
 
     curl_close($ch);
 
-    echo "URL sumber : {$url}\n";
-    echo "URL akhir  : {$finalUrl}\n";
-    echo "HTTP       : {$httpCode}\n";
+    $log("URL sumber : {$url}");
+    $log("URL akhir  : {$finalUrl}");
+    $log("HTTP       : {$httpCode}");
 
     if ($html === false || $html === '') {
-        throw new RuntimeException(
-            'Gagal mengambil HTML website. ' . $error
-        );
+        throw new RuntimeException('Gagal mengambil HTML website. ' . $error);
     }
 
     if ($httpCode < 200 || $httpCode >= 300) {
-        throw new RuntimeException(
-            "Website mengembalikan HTTP {$httpCode}."
-        );
+        throw new RuntimeException("Website mengembalikan HTTP {$httpCode}.");
     }
 
-    // Simpan HTML untuk pemeriksaan jika struktur website berubah.
-    file_put_contents(DEBUG_FILE, $html);
-
-    return $html;
+    return (string) $html;
 }
 
 // =====================================================
@@ -169,6 +187,43 @@ function removeBranchNumber(string $text): string
 function containsBranchNumber(string $text): bool
 {
     return extractBranchNumber($text) !== '';
+}
+
+/**
+ * Penanda cabang yang ketat. Dipakai untuk mendeteksi nomor cabang
+ * dan menghitung penanda dalam sebuah container.
+ *
+ * Lolos:
+ *   "# 01 Jakarta Utara", "# 1", "01 Jakarta Utara",
+ *   "Cabang 01 Bekasi", "1. Surabaya", "01" (nomor berawalan nol berdiri sendiri)
+ * Ditolak:
+ *   teks panjang, "24 jam", "1 gram", "08.00 - 17.00", nomor telepon
+ */
+function isBranchMarkerText(string $text): bool
+{
+    $text = normalizeText($text);
+
+    if ($text === '' || mb_strlen($text, 'UTF-8') > 80) {
+        return false;
+    }
+
+    // Format "# 01" dengan atau tanpa nama.
+    if (preg_match('/^\s*#\s*\d{1,3}(?=\s|[-.:]|$)/u', $text)) {
+        return true;
+    }
+
+    // Nomor berawalan nol yang berdiri sendiri, mis. "01".
+    if (preg_match('/^\s*0\d{1,2}\s*$/u', $text)) {
+        return true;
+    }
+
+    // Nomor diikuti nama (minimal 3 huruf) yang bukan satuan umum.
+    return preg_match(
+        '/^\s*(?:cabang\s*)?\d{1,3}(?=\s|[-.:])\s*[-.:]?\s*'
+        . '(?!(?:jam|gram|gr|kg|kilo|hari|tahun|bulan|menit|detik|persen|karat|wib|wita|wit)\b)'
+        . '\p{L}{3,}/iu',
+        $text
+    ) === 1;
 }
 
 // =====================================================
@@ -304,6 +359,19 @@ function findLinkByText(DOMXPath $xpath, DOMNode $container, array $keywords): s
 // 7. MENDETEKSI NOMOR CABANG PADA BERBAGAI TAG HTML
 // =====================================================
 
+function directTextOf(DOMElement $element): string
+{
+    $directText = '';
+
+    foreach ($element->childNodes as $child) {
+        if ($child instanceof DOMText) {
+            $directText .= ' ' . $child->nodeValue;
+        }
+    }
+
+    return normalizeText($directText);
+}
+
 function findNumberNodes(DOMXPath $xpath): array
 {
     $nodes = $xpath->query('//*[text()[normalize-space()]]');
@@ -319,26 +387,17 @@ function findNumberNodes(DOMXPath $xpath): array
             continue;
         }
 
-        // Nomor harus berada pada teks langsung elemen ini,
-        // bukan sekadar teks dari elemen anak.
-        $directText = '';
+        $tag = strtolower($node->tagName);
 
-        foreach ($node->childNodes as $child) {
-            if ($child instanceof DOMText) {
-                $directText .= ' ' . $child->nodeValue;
-            }
-        }
-
-        $directText = normalizeText($directText);
-
-        if ($directText === '') {
+        if (in_array($tag, ['script', 'style', 'noscript', 'title', 'option'], true)) {
             continue;
         }
 
-        if (!preg_match(
-            '/^\s*(?:#\s*)?(?:cabang\s*)?0*\d{1,3}(?=\s|[-.:]|$)/iu',
-            $directText
-        )) {
+        // Nomor harus berada pada teks langsung elemen ini,
+        // bukan sekadar teks dari elemen anak.
+        $directText = directTextOf($node);
+
+        if ($directText === '' || !isBranchMarkerText($directText)) {
             continue;
         }
 
@@ -373,15 +432,7 @@ function countNumberMarkers(DOMXPath $xpath, DOMNode $node): int
                 continue;
             }
 
-            $directText = '';
-
-            foreach ($child->childNodes as $textNode) {
-                if ($textNode instanceof DOMText) {
-                    $directText .= ' ' . $textNode->nodeValue;
-                }
-            }
-
-            if (containsBranchNumber(normalizeText($directText))) {
+            if (isBranchMarkerText(directTextOf($child))) {
                 $count++;
             }
         }
@@ -390,68 +441,28 @@ function countNumberMarkers(DOMXPath $xpath, DOMNode $node): int
     return $count;
 }
 
-function findBranchContainer(
-    DOMXPath $xpath,
-    DOMNode $numberNode
-): DOMNode {
+/**
+ * Naik dari penanda nomor ke ancestor terbesar yang masih hanya
+ * memuat SATU penanda cabang (kartu cabang itu sendiri).
+ */
+function findBranchContainer(DOMXPath $xpath, DOMNode $numberNode): DOMNode
+{
     $current = $numberNode;
     $best = $numberNode;
-    $bestScore = -PHP_INT_MAX;
 
-    for ($level = 0; $level < 10 && $current !== null; $level++) {
-        if (!$current instanceof DOMElement) {
-            $current = $current->parentNode;
-            continue;
-        }
+    for ($level = 0; $level < 10 && $current instanceof DOMNode; $level++) {
+        if ($current instanceof DOMElement) {
+            // Sudah mencakup cabang lain: berhenti, pakai yang sebelumnya.
+            if (countNumberMarkers($xpath, $current) > 1) {
+                break;
+            }
 
-        $text = normalizeText($current->textContent);
+            // Batasi ukuran supaya tidak memilih seluruh bagian lokasi.
+            if (mb_strlen(normalizeText($current->textContent), 'UTF-8') > 5000) {
+                break;
+            }
 
-        // Batasi ukuran supaya tidak memilih seluruh bagian lokasi.
-        if (mb_strlen($text, 'UTF-8') > 5000) {
-            $current = $current->parentNode;
-            continue;
-        }
-
-        $mapUrl = findLinkByText($xpath, $current, ['Map']);
-        $directionUrl = findLinkByText(
-            $xpath,
-            $current,
-            ['Menuju Lokasi', 'Petunjuk Arah', 'Directions']
-        );
-
-        $phoneFound = preg_match(
-            '/(?:\+62|62|0)\s*[\d\s().-]{7,}/u',
-            $text
-        ) === 1;
-
-        $addressFound = preg_match(
-            '/\b(jalan|jl\.?|rukan|ruko|mall|mal|lantai|blok|komplek|kompleks|kawasan|gedung|plaza|no\.?)\b/iu',
-            $text
-        ) === 1;
-
-        $numberMarkers = countNumberMarkers($xpath, $current);
-
-        $score = 0;
-        $score += $mapUrl !== '' ? 8 : 0;
-        $score += $directionUrl !== '' ? 8 : 0;
-        $score += $phoneFound ? 3 : 0;
-        $score += $addressFound ? 3 : 0;
-        $score -= max(0, $numberMarkers - 1) * 12;
-        $score -= max(0, mb_strlen($text, 'UTF-8') - 1200) / 100;
-
-        if ($score > $bestScore) {
-            $bestScore = $score;
             $best = $current;
-        }
-
-        // Hentikan setelah menemukan container dengan dua tautan lokasi
-        // dan tidak memuat penanda nomor cabang lain.
-        if (
-            $mapUrl !== ''
-            && $directionUrl !== ''
-            && $numberMarkers <= 1
-        ) {
-            return $current;
         }
 
         $current = $current->parentNode;
@@ -599,7 +610,7 @@ function extractNotes(array $lines): string
 // 10. PARSING SEMUA CABANG
 // =====================================================
 
-function parseBranches(string $html): array
+function parseBranches(string $html, callable $log): array
 {
     if (!class_exists(DOMDocument::class)) {
         throw new RuntimeException(
@@ -625,7 +636,7 @@ function parseBranches(string $html): array
     $xpath = new DOMXPath($dom);
     $numberNodes = findNumberNodes($xpath);
 
-    echo 'Penanda nomor ditemukan: ' . count($numberNodes) . "\n";
+    $log('Penanda nomor ditemukan: ' . count($numberNodes));
 
     $branches = [];
 
@@ -638,11 +649,7 @@ function parseBranches(string $html): array
         $container = findBranchContainer($xpath, $markerNode);
         $lines = collectTextLines($container);
 
-        $title = extractBranchTitle(
-            $xpath,
-            $container,
-            $markerText
-        );
+        $title = extractBranchTitle($xpath, $container, $markerText);
 
         $address = extractAddress($lines);
         $phone = extractPhone($lines);
@@ -657,62 +664,9 @@ function parseBranches(string $html): array
             ['Menuju Lokasi', 'Petunjuk Arah', 'Directions']
         );
 
-        // Jika container berisi banyak nomor cabang, jangan menyimpan
-        // satu container gabungan untuk banyak cabang.
-        if (countNumberMarkers($xpath, $container) > 1) {
-            $parent = $markerNode->parentNode;
-
-            if ($parent instanceof DOMNode) {
-                $smallerContainer = findBranchContainer($xpath, $markerNode);
-                $smallerLines = collectTextLines($smallerContainer);
-
-                $smallerTitle = extractBranchTitle(
-                    $xpath,
-                    $smallerContainer,
-                    $markerText
-                );
-
-                $smallerAddress = extractAddress($smallerLines);
-                $smallerPhone = extractPhone($smallerLines);
-                $smallerHours = extractHours($smallerLines);
-                $smallerNotes = extractNotes($smallerLines);
-
-                $smallerMap = findLinkByText(
-                    $xpath,
-                    $smallerContainer,
-                    ['Map']
-                );
-
-                $smallerDirection = findLinkByText(
-                    $xpath,
-                    $smallerContainer,
-                    ['Menuju Lokasi', 'Petunjuk Arah', 'Directions']
-                );
-
-                if (
-                    $smallerTitle !== ''
-                    || $smallerAddress !== ''
-                    || $smallerMap !== ''
-                    || $smallerDirection !== ''
-                ) {
-                    $title = $smallerTitle;
-                    $address = $smallerAddress;
-                    $phone = $smallerPhone;
-                    $hours = $smallerHours;
-                    $notes = $smallerNotes;
-                    $mapUrl = $smallerMap;
-                    $directionUrl = $smallerDirection;
-                }
-            }
-        }
-
-        // Lewati hasil yang jelas bukan kartu cabang.
-        if (
-            $title === ''
-            && $address === ''
-            && $mapUrl === ''
-            && $directionUrl === ''
-        ) {
+        // Kartu cabang harus punya alamat atau tautan lokasi,
+        // bukan sekadar judul. Ini menyaring teks sampah di homepage.
+        if ($address === '' && $mapUrl === '' && $directionUrl === '') {
             continue;
         }
 
@@ -735,6 +689,14 @@ function parseBranches(string $html): array
         if (!isset($branches[$key])) {
             $branches[$key] = $branch;
         } else {
+            if ($branches[$key]['title'] !== $branch['title']) {
+                $log(
+                    "PERINGATAN: nomor {$key} dipakai lebih dari satu kartu: \""
+                    . $branches[$key]['title'] . '" dan "' . $branch['title']
+                    . '". Keduanya digabung jadi satu baris karena nomor harus unik.'
+                );
+            }
+
             foreach ($branch as $field => $value) {
                 if (
                     $value !== ''
@@ -759,70 +721,125 @@ function parseBranches(string $html): array
     return array_values($branches);
 }
 
+/**
+ * Diagnosa hasil parsing, supaya jelas kenapa sebuah cabang tidak masuk:
+ * - nomor tertinggi dan 3 cabang terakhir yang terbaca
+ * - nomor yang bolong di tengah
+ * - perbandingan dengan jumlah cabang yang diklaim teks website
+ */
+function diagnoseBranches(string $html, array $branches, callable $log): void
+{
+    if ($branches === []) {
+        return;
+    }
+
+    $numbers = array_map(
+        static fn(array $b): int => (int) $b['branch_number'],
+        $branches
+    );
+
+    $max = max($numbers);
+    $log("Nomor cabang tertinggi terbaca: {$max}");
+
+    $last = array_slice($branches, -3);
+    $labels = array_map(
+        static fn(array $b): string => $b['branch_number'] . ' ' . $b['title'],
+        $last
+    );
+    $log('3 cabang terakhir terbaca: ' . implode(' | ', $labels));
+
+    $missing = [];
+
+    for ($i = 1; $i <= $max; $i++) {
+        if (!in_array($i, $numbers, true)) {
+            $missing[] = $i;
+        }
+    }
+
+    if ($missing !== []) {
+        $log(
+            'PERINGATAN: nomor tidak ditemukan di HTML: '
+            . implode(', ', array_slice($missing, 0, 30))
+            . (count($missing) > 30 ? ' ...' : '')
+        );
+    }
+
+    $text = normalizeText(strip_tags($html));
+
+    if (preg_match_all('/Tersebar\s+di\s+(\d{1,4})\s+Cabang/iu', $text, $m)) {
+        $declared = max(array_map('intval', $m[1]));
+        $log("Website menyatakan total cabang: {$declared}");
+
+        if ($declared > count($branches)) {
+            $log(
+                "PERINGATAN: website menyatakan {$declared} cabang, tetapi HTML yang diterima server "
+                . 'hanya memuat ' . count($branches) . '. Selisihnya kemungkinan dimuat lewat '
+                . 'JavaScript/AJAX atau belum ada di HTML yang dikirim server (cache).'
+            );
+        }
+    }
+}
+
 // =====================================================
 // 11. PASTIKAN TABEL TERSEDIA
 // =====================================================
 
 function ensureTable(PDO $pdo): void
 {
+    // Skema sama dengan tabel yang dibuat admin.php. Sengaja TANPA indeks unik
+    // dan tanpa mengubah struktur tabel yang sudah ada: admin boleh menambah
+    // cabang manual, dan kolom sort_order bersifat opsional (lihat syncBranch).
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `" . DB_TABLE . "` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `branch_number` VARCHAR(20) NOT NULL,
-            `title` VARCHAR(255) NOT NULL DEFAULT '',
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `branch_number` VARCHAR(10) NOT NULL,
+            `title` VARCHAR(255) NOT NULL,
             `address` TEXT NOT NULL,
-            `phone` VARCHAR(100) NOT NULL DEFAULT '',
-            `hours` VARCHAR(255) NOT NULL DEFAULT '',
-            `notes` TEXT NOT NULL,
+            `phone` VARCHAR(50) NOT NULL,
+            `hours` VARCHAR(100) NOT NULL,
+            `notes` VARCHAR(255) DEFAULT NULL,
             `map_embed_url` TEXT NOT NULL,
             `map_link` TEXT NOT NULL,
-            `sort_order` INT NOT NULL DEFAULT 0,
-            `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uq_branches_branch_number` (`branch_number`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+}
 
-    // Jangan otomatis mengubah struktur tabel yang sudah ada.
-    // Periksa apakah branch_number memiliki indeks unik.
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM information_schema.statistics
-        WHERE table_schema = DATABASE()
-          AND table_name = :table_name
-          AND column_name = 'branch_number'
-          AND non_unique = 0
-    ");
+function tableHasColumn(PDO $pdo, string $column): bool
+{
+    static $cache = [];
 
-    $stmt->execute([':table_name' => DB_TABLE]);
+    $key = DB_TABLE . '.' . $column;
 
-    if ((int) $stmt->fetchColumn() === 0) {
-        $duplicates = $pdo->query("
-            SELECT branch_number, COUNT(*) AS total
-            FROM `" . DB_TABLE . "`
-            GROUP BY branch_number
-            HAVING COUNT(*) > 1
-            LIMIT 5
-        ")->fetchAll();
+    if (!isset($cache[$key])) {
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = :table_name
+              AND column_name = :column_name
+        ");
 
-        if ($duplicates !== []) {
-            throw new RuntimeException(
-                'Terdapat nomor cabang duplikat di database. ' .
-                'Bersihkan duplikat terlebih dahulu sebelum membuat indeks unik.'
-            );
-        }
-
-        $pdo->exec(
-            'ALTER TABLE `' . DB_TABLE .
-            '` ADD UNIQUE KEY `uq_branches_branch_number` (`branch_number`)'
-        );
+        $stmt->execute([':table_name' => DB_TABLE, ':column_name' => $column]);
+        $cache[$key] = (int) $stmt->fetchColumn() > 0;
     }
+
+    return $cache[$key];
 }
 
 // =====================================================
 // 12. SINKRONISASI DATABASE
 // =====================================================
 
+/**
+ * Menambah atau memperbarui satu cabang.
+ * Mengembalikan: 'inserted' | 'updated' | 'unchanged'
+ *
+ * - Pencocokan memakai nilai angka (CAST), jadi "01" di DB cocok dengan "1".
+ * - Cabang baru disimpan dengan nomor 2 digit ("01", "02", ...) seperti di website/admin.
+ * - Kolom sort_order hanya dipakai jika ada di tabel.
+ * - Nilai dipotong sesuai batas kolom agar tidak gagal "Data too long".
+ */
 function syncBranch(PDO $pdo, array $branch): string
 {
     $number = trim((string) ($branch['branch_number'] ?? ''));
@@ -831,146 +848,248 @@ function syncBranch(PDO $pdo, array $branch): string
         throw new InvalidArgumentException('Nomor cabang tidak valid.');
     }
 
-    // Periksa apakah cabang sudah ada.
+    $numberInt = (int) $number;
+
+    $limits = [
+        'title'         => 255,
+        'address'       => 60000,
+        'phone'         => 50,
+        'hours'         => 100,
+        'notes'         => 255,
+        'map_embed_url' => 60000,
+        'map_link'      => 60000,
+    ];
+
+    $fields = array_keys($limits);
+    $hasSort = tableHasColumn($pdo, 'sort_order');
+
     $check = $pdo->prepare(
-        'SELECT * FROM `' . DB_TABLE . '` WHERE branch_number = :number LIMIT 1'
+        'SELECT * FROM `' . DB_TABLE . '`
+         WHERE CAST(branch_number AS UNSIGNED) = :number
+         ORDER BY id ASC
+         LIMIT 1'
     );
 
-    $check->execute([':number' => $number]);
+    $check->execute([':number' => $numberInt]);
     $existing = $check->fetch();
-
-    $fields = [
-        'title',
-        'address',
-        'phone',
-        'hours',
-        'notes',
-        'map_embed_url',
-        'map_link',
-    ];
 
     $values = [];
 
     foreach ($fields as $field) {
         $newValue = trim((string) ($branch[$field] ?? ''));
 
-        if ($existing) {
-            $oldValue = trim((string) ($existing[$field] ?? ''));
-
-            // Pertahankan data lama jika scraping tidak mendapatkan nilai.
-            $values[$field] = $newValue !== '' ? $newValue : $oldValue;
+        if ($existing && $newValue === '' && in_array($field, PRESERVE_WHEN_EMPTY, true)) {
+            // Jangan menimpa data penting dengan kosong jika scraping gagal membacanya.
+            $values[$field] = trim((string) ($existing[$field] ?? ''));
         } else {
-            // Kolom teks tidak boleh dikirim sebagai NULL.
-            $values[$field] = $newValue;
+            $values[$field] = mb_substr($newValue, 0, $limits[$field], 'UTF-8');
         }
     }
 
     if ($existing) {
-        $update = $pdo->prepare("
-            UPDATE `" . DB_TABLE . "`
-            SET
-                title = :title,
-                address = :address,
-                phone = :phone,
-                hours = :hours,
-                notes = :notes,
-                map_embed_url = :map_embed_url,
-                map_link = :map_link
-            WHERE branch_number = :branch_number
-        ");
+        $changed = $hasSort && (int) ($existing['sort_order'] ?? 0) !== $numberInt;
 
-        $update->execute([
-            ':branch_number' => $number,
-            ':title'         => $values['title'],
-            ':address'       => $values['address'],
-            ':phone'         => $values['phone'],
-            ':hours'         => $values['hours'],
-            ':notes'         => $values['notes'],
-            ':map_embed_url' => $values['map_embed_url'],
-            ':map_link'      => $values['map_link'],
-        ]);
+        foreach ($fields as $field) {
+            if (trim((string) ($existing[$field] ?? '')) !== $values[$field]) {
+                $changed = true;
+                break;
+            }
+        }
+
+        if (!$changed) {
+            return 'unchanged';
+        }
+
+        $set = [];
+        $params = [':id' => $existing['id']];
+
+        foreach ($fields as $field) {
+            $set[] = "`{$field}` = :{$field}";
+            $params[':' . $field] = $values[$field];
+        }
+
+        if ($hasSort) {
+            $set[] = '`sort_order` = :sort_order';
+            $params[':sort_order'] = $numberInt;
+        }
+
+        $pdo->prepare(
+            'UPDATE `' . DB_TABLE . '` SET ' . implode(', ', $set) . ' WHERE id = :id'
+        )->execute($params);
 
         return 'updated';
     }
 
-    $insert = $pdo->prepare("
-        INSERT INTO `" . DB_TABLE . "` (
-            branch_number,
-            title,
-            address,
-            phone,
-            hours,
-            notes,
-            map_embed_url,
-            map_link,
-            sort_order
-        ) VALUES (
-            :branch_number,
-            :title,
-            :address,
-            :phone,
-            :hours,
-            :notes,
-            :map_embed_url,
-            :map_link,
-            :sort_order
-        )
-    ");
+    $columns = array_merge(['branch_number'], $fields);
 
-    $insert->execute([
-        ':branch_number' => $number,
-        ':title'         => $values['title'],
-        ':address'       => $values['address'],
-        ':phone'         => $values['phone'],
-        ':hours'         => $values['hours'],
-        ':notes'         => $values['notes'],
-        ':map_embed_url' => $values['map_embed_url'],
-        ':map_link'      => $values['map_link'],
-        ':sort_order'    => (int) $number,
-    ]);
+    $params = [
+        ':branch_number' => str_pad((string) $numberInt, 2, '0', STR_PAD_LEFT),
+    ];
+
+    foreach ($fields as $field) {
+        $params[':' . $field] = $values[$field];
+    }
+
+    if ($hasSort) {
+        $columns[] = 'sort_order';
+        $params[':sort_order'] = $numberInt;
+    }
+
+    $placeholders = array_map(
+        static fn(string $column): string => ':' . $column,
+        $columns
+    );
+
+    $pdo->prepare(
+        'INSERT INTO `' . DB_TABLE . '` (`' . implode('`, `', $columns) . '`) '
+        . 'VALUES (' . implode(', ', $placeholders) . ')'
+    )->execute($params);
 
     return 'inserted';
 }
 
-// =====================================================
-// 13. JALANKAN SCRAPING DAN SINKRONISASI
-// =====================================================
-
-function main(): void
+/**
+ * Menghapus cabang di DB yang nomornya tidak ada lagi di hasil scraping.
+ * Mengembalikan jumlah baris yang dihapus.
+ */
+function deleteMissingBranches(PDO $pdo, array $keepNumbers, callable $log): int
 {
-    echo "========================================\n";
-    echo " SCRAPER CABANG RAJA EMAS INDONESIA\n";
-    echo "========================================\n\n";
+    if (!DELETE_MISSING) {
+        return 0;
+    }
 
-    $pdo = connectDatabase();
-    ensureTable($pdo);
+    $rows = $pdo->query(
+        'SELECT id, branch_number, title FROM `' . DB_TABLE . '`'
+    )->fetchAll();
 
-    $html = fetchWebsite(SOURCE_URL);
+    $keep = array_map('intval', $keepNumbers);
+    $toDelete = [];
 
-    echo 'Ukuran HTML : ' . number_format(strlen($html)) . " bytes\n\n";
+    foreach ($rows as $row) {
+        if (!in_array((int) $row['branch_number'], $keep, true)) {
+            $toDelete[] = $row;
+        }
+    }
 
-    $branches = parseBranches($html);
+    if ($toDelete === []) {
+        return 0;
+    }
 
-    echo 'Jumlah cabang berhasil diparsing: ' . count($branches) . "\n";
+    $existingCount = count($rows);
+    $keptCount = count($keep);
 
-    if ($branches === []) {
-        throw new RuntimeException(
-            'Tidak ada cabang yang berhasil diparsing. ' .
-            'Periksa file debug-branches.html dan struktur HTML website.'
+    if (
+        $existingCount >= DELETE_GUARD_MIN_ROWS
+        && $keptCount < $existingCount * DELETE_MIN_KEEP_RATIO
+    ) {
+        $log(
+            "PERINGATAN: penghapusan DIBATALKAN. Website hanya terbaca {$keptCount} cabang, "
+            . "sedangkan DB berisi {$existingCount}. Kemungkinan halaman/parsing bermasalah."
+        );
+
+        return 0;
+    }
+
+    $delete = $pdo->prepare('DELETE FROM `' . DB_TABLE . '` WHERE id = :id');
+    $deleted = 0;
+
+    foreach ($toDelete as $row) {
+        $delete->execute([':id' => $row['id']]);
+        $deleted++;
+
+        $log(
+            str_pad((string) $row['branch_number'], 6)
+            . str_pad('DELETED', 10)
+            . mb_substr((string) $row['title'], 0, 39, 'UTF-8')
         );
     }
 
-    echo "\n";
-    echo str_pad('NO', 6)
-        . str_pad('NAMA CABANG', 42)
-        . str_pad('ALAMAT', 12)
-        . str_pad('MAP', 8)
-        . "MENUJU LOKASI\n";
+    return $deleted;
+}
 
-    echo str_repeat('-', 100) . "\n";
+// =====================================================
+// 13. PROSES UTAMA
+// =====================================================
+
+/**
+ * Ambil dari website -> parse -> sinkron ke DB (tambah, ubah, hapus).
+ *
+ * @param callable|null $logger fn(string $line): void, opsional
+ * @return array{parsed:int,inserted:int,updated:int,unchanged:int,deleted:int,failed:int,total:int,failures:array,log:array}
+ */
+function runSync(?callable $logger = null, ?PDO $pdo = null): array
+{
+    @set_time_limit(120);
+
+    $lines = [];
+
+    $log = static function (string $line) use (&$lines, $logger): void {
+        $lines[] = $line;
+
+        if ($logger !== null) {
+            $logger($line);
+        }
+    };
+
+    // Pakai koneksi dari pemanggil (admin.php) agar menulis ke DB yang sama dengan CMS.
+    $pdo = $pdo ?? connectDatabase();
+    ensureTable($pdo);
+
+    $html = fetchWebsite(SOURCE_URL, $log);
+
+    $log('Ukuran HTML : ' . number_format(strlen($html)) . ' bytes');
+
+    $branches = parseBranches($html, $log);
+
+    $log('Jumlah cabang berhasil diparsing: ' . count($branches));
+
+    if ($branches === []) {
+        throw new RuntimeException(
+            'Tidak ada cabang yang berhasil diparsing, DB tidak diubah. ' .
+            'Kemungkinan daftar cabang dimuat lewat JavaScript atau struktur HTML berubah.'
+        );
+    }
+
+    diagnoseBranches($html, $branches, $log);
+
+    $dupes = $pdo->query(
+        'SELECT CAST(branch_number AS UNSIGNED) AS n, COUNT(*) AS c FROM `' . DB_TABLE . '`
+         GROUP BY n HAVING COUNT(*) > 1'
+    )->fetchAll();
+
+    foreach ($dupes as $dupe) {
+        $log(
+            "PERINGATAN: di database nomor {$dupe['n']} dipakai {$dupe['c']} baris. "
+            . 'Hanya baris dengan id terkecil yang disinkronkan; hapus duplikatnya di admin.'
+        );
+    }
+
+    $dbCountBefore = (int) $pdo->query(
+        'SELECT COUNT(*) FROM `' . DB_TABLE . '`'
+    )->fetchColumn();
+
+    if ($dbCountBefore > count($branches)) {
+        $log(
+            'CATATAN: DB berisi ' . $dbCountBefore . ' cabang, hasil scraping hanya '
+            . count($branches) . '. Selisihnya akan dihapus jika lolos pengaman.'
+        );
+    }
+
+    $log('');
+    $log(
+        str_pad('NO', 6)
+        . str_pad('STATUS', 10)
+        . str_pad('NAMA CABANG', 42)
+        . str_pad('ALAMAT', 10)
+        . str_pad('MAP', 8)
+        . 'MENUJU LOKASI'
+    );
+    $log(str_repeat('-', 110));
 
     $inserted = 0;
     $updated = 0;
+    $unchanged = 0;
+    $deleted = 0;
     $failed = 0;
     $failures = [];
 
@@ -983,36 +1102,38 @@ function main(): void
 
                 if ($status === 'inserted') {
                     $inserted++;
-                } else {
+                } elseif ($status === 'updated') {
                     $updated++;
+                } else {
+                    $unchanged++;
                 }
 
-                echo str_pad($branch['branch_number'], 6)
-                    . str_pad(
-                        mb_substr($branch['title'], 0, 39, 'UTF-8'),
-                        42
-                    )
-                    . str_pad($branch['address'] !== '' ? 'YA' : 'KOSONG', 12)
+                $log(
+                    str_pad($branch['branch_number'], 6)
+                    . str_pad(strtoupper($status), 10)
+                    . str_pad(mb_substr($branch['title'], 0, 39, 'UTF-8'), 42)
+                    . str_pad($branch['address'] !== '' ? 'YA' : 'KOSONG', 10)
                     . str_pad($branch['map_embed_url'] !== '' ? 'YA' : 'TIDAK', 8)
                     . ($branch['map_link'] !== '' ? 'YA' : 'TIDAK')
-                    . "\n";
-
-                if ($branch['address'] === '') {
-                    echo "  PERINGATAN: alamat cabang {$branch['branch_number']} kosong pada hasil scraping.\n";
-                }
+                );
             } catch (Throwable $e) {
                 $failed++;
                 $failures[] = [
-                    'number' => $branch['branch_number'],
+                    'number'  => $branch['branch_number'],
                     'message' => $e->getMessage(),
                 ];
 
-                echo "GAGAL cabang {$branch['branch_number']}: "
-                    . $e->getMessage() . "\n";
+                $log("GAGAL cabang {$branch['branch_number']}: " . $e->getMessage());
             }
         }
 
-        // Jika ada kegagalan, data yang sukses tetap disimpan.
+        // Hapus cabang yang sudah tidak ada di website.
+        $deleted = deleteMissingBranches(
+            $pdo,
+            array_column($branches, 'branch_number'),
+            $log
+        );
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -1022,36 +1143,57 @@ function main(): void
         throw $e;
     }
 
-    $totalDb = (int) $pdo->query(
+    $total = (int) $pdo->query(
         'SELECT COUNT(*) FROM `' . DB_TABLE . '`'
     )->fetchColumn();
 
-    echo "\n========================================\n";
-    echo " HASIL SINKRONISASI\n";
+    $log('');
+    $log('========================================');
+    $log(' HASIL SINKRONISASI');
+    $log('========================================');
+    $log('Cabang diparsing  : ' . count($branches));
+    $log("Cabang ditambah   : {$inserted}");
+    $log("Cabang diperbarui : {$updated}");
+    $log("Tidak berubah     : {$unchanged}");
+    $log("Cabang dihapus    : {$deleted}");
+    $log("Cabang gagal      : {$failed}");
+    $log("Total di database : {$total}");
+
+    return [
+        'parsed'    => count($branches),
+        'inserted'  => $inserted,
+        'updated'   => $updated,
+        'unchanged' => $unchanged,
+        'deleted'   => $deleted,
+        'failed'    => $failed,
+        'total'     => $total,
+        'failures'  => $failures,
+        'log'       => $lines,
+    ];
+}
+
+/**
+ * Versi yang langsung mencetak log (CLI atau halaman admin sederhana).
+ */
+function main(?PDO $pdo = null): void
+{
     echo "========================================\n";
-    echo "Cabang diparsing : " . count($branches) . "\n";
-    echo "Cabang ditambah  : {$inserted}\n";
-    echo "Cabang diperbarui: {$updated}\n";
-    echo "Cabang gagal     : {$failed}\n";
-    echo "Total di database: {$totalDb}\n";
-    echo "HTML debug       : " . DEBUG_FILE . "\n";
+    echo " SCRAPER CABANG RAJA EMAS INDONESIA\n";
+    echo "========================================\n\n";
 
-    if ($failures !== []) {
-        echo "\nRincian kegagalan:\n";
-
-        foreach ($failures as $failure) {
-            echo '- Cabang ' . $failure['number']
-                . ': ' . $failure['message'] . "\n";
-        }
-    }
+    runSync(static function (string $line): void {
+        echo $line . "\n";
+    }, $pdo);
 
     echo "\nSelesai.\n";
 }
 
 // Jalankan otomatis hanya ketika file ini dipanggil langsung.
-// Jika di-include oleh halaman admin, main() dipanggil setelah login dan CSRF diperiksa.
-$isDirectExecution = isset($_SERVER['SCRIPT_FILENAME'])
-    && realpath((string) $_SERVER['SCRIPT_FILENAME']) === realpath(__FILE__);
+// Jika di-include oleh halaman admin, panggil runSync() atau main()
+// setelah login dan CSRF diperiksa.
+$isDirectExecution = PHP_SAPI === 'cli'
+    || (isset($_SERVER['SCRIPT_FILENAME'])
+        && realpath((string) $_SERVER['SCRIPT_FILENAME']) === realpath(__FILE__));
 
 if ($isDirectExecution) {
     try {
