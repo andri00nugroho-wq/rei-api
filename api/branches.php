@@ -1,8 +1,6 @@
 <?php
 declare(strict_types=1);
 
-
-
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
@@ -21,11 +19,199 @@ function jsonResponse(int $status, array $data): never
     exit;
 }
 
-/*
-|--------------------------------------------------------------------------
-| 1. Validasi HTTP method
-|--------------------------------------------------------------------------
-*/
+
+const BRANCH_COLUMN_ALIASES = [
+    'branch_number' => ['branch_number', 'nomor_cabang', 'no_cabang', 'nomor', 'number', 'no'],
+    'title'         => ['title', 'name', 'nama', 'nama_cabang', 'branch_name'],
+    'address'       => ['address', 'alamat'],
+    'phone'         => ['phone', 'telepon', 'telp', 'hp', 'whatsapp', 'phone_whatsapp', 'hp_whatsapp', 'wa'],
+    'hours'         => ['hours', 'jam', 'jam_operasional', 'jam_buka', 'opening_hours', 'open_hours', 'buka'],
+    'notes'         => ['notes', 'note', 'catatan', 'keterangan'],
+    'map_link'      => ['map_link', 'maps_link', 'link_peta', 'map_url'],
+    'map_embed_url' => ['map_embed_url', 'map_embed', 'embed_peta', 'embed_url'],
+];
+
+function cleanText(mixed $v): string
+{
+    $s = trim((string) ($v ?? ''));
+
+    if ($s === '') {
+        return '';
+    }
+
+    $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $s = preg_replace('/<br\s*\/?>/i', "\n", $s) ?? $s;
+    $s = strip_tags($s);
+    $s = preg_replace('/[ \t\x{00A0}]+/u', ' ', $s) ?? $s;
+    $s = preg_replace('/\s*\R\s*/u', "\n", $s) ?? $s;
+
+    return trim($s);
+}
+
+const REJECT_NUMERIC_TITLES = true;
+
+function isJunkTitle(string $title): bool
+{
+    $t = cleanText($title);
+
+    return $t !== '' && (bool) preg_match('/^[\d\s\-+().]+$/', $t);
+}
+
+function blockKey(string $title): string
+{
+    $t = cleanText($title);
+
+    if (
+        preg_match('/^(.*?)\s*No\.\s*(\d+)$/u', $t, $m)
+        || preg_match('/^(.*?)\s+No\s+(\d+)$/u', $t, $m)
+    ) {
+        if (trim($m[1]) !== '') {
+            $t = rtrim(trim($m[1]), ' -,');
+        }
+    }
+
+    $t = mb_strtolower($t, 'UTF-8');
+    $t = preg_replace('/\s+/u', ' ', $t) ?? $t;
+
+    return mb_substr(trim($t), 0, 191, 'UTF-8');
+}
+
+function mapQuery(string $url): string
+{
+    if ($url === '') {
+        return '';
+    }
+
+    $qs = parse_url($url, PHP_URL_QUERY);
+
+    if (!is_string($qs) || $qs === '') {
+        return '';
+    }
+
+    parse_str($qs, $p);
+
+    foreach (['q', 'query'] as $key) {
+        if (!empty($p[$key]) && is_string($p[$key])) {
+            $q = trim($p[$key]);
+            if (preg_match('/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/', $q)) {
+                return '';
+            }
+
+            return $q;
+        }
+    }
+
+    return '';
+}
+
+function fillBranch(array $b): array
+{
+    $title   = cleanText($b['title'] ?? '');
+    $rawTitle = $title;
+    $number  = cleanText($b['branch_number'] ?? '');
+    $address = cleanText($b['address'] ?? '');
+    $phone   = cleanText($b['phone'] ?? '');
+    $hours   = cleanText($b['hours'] ?? '');
+    $notes   = cleanText($b['notes'] ?? '');
+    $link    = trim((string) ($b['map_link'] ?? ''));
+    $embed   = trim((string) ($b['map_embed_url'] ?? ''));
+
+    if ($embed !== '' && preg_match('/src=["\']([^"\']+)["\']/i', $embed, $m)) {
+        $embed = html_entity_decode($m[1]);
+    }
+    if (
+        preg_match('/^(.*?)\s*No\.\s*(\d+)$/u', $title, $m)
+        || preg_match('/^(.*?)\s+No\s+(\d+)$/u', $title, $m)
+    ) {
+        if (trim($m[1]) !== '') {
+            $title = rtrim(trim($m[1]), " -,");
+
+            if ($number === '') {
+                $number = $m[2];
+            }
+        }
+    }
+
+    if ($number !== '' && preg_match('/(\d+)/', $number, $m)) {
+        $number = $m[1];
+    }
+
+    if ($title !== '' && preg_match('/^[\d\s\-+().]+$/', $title)) {
+        if ($phone === '') {
+            $phone = $title;
+        }
+
+        $title = '';
+    }
+
+    if ($address === '') {
+        $q = mapQuery($embed) ?: mapQuery($link);
+
+        if ($q !== '' && $title !== '' && stripos($q, $title) === 0) {
+            $rest = trim(substr($q, strlen($title)), " ,-");
+
+            if ($rest !== '') {
+                $address = $rest;
+            }
+        }
+    }
+
+    $haystack = $notes . ' ' . $address;
+
+    if (
+        $hours === ''
+        && preg_match('/(\d{1,2}[.:]\d{2})\s*[-–]\s*(\d{1,2}[.:]\d{2})/u', $haystack, $m)
+    ) {
+        $hours = 'Pukul ' . $m[1] . ' - ' . $m[2] . ' WIB';
+    }
+
+    if (
+        $phone === ''
+        && preg_match('/(?:\+62|62|0)8\d{1,3}[\s\-]?\d{3,4}[\s\-]?\d{3,5}/', $haystack, $m)
+    ) {
+        $phone = trim($m[0]);
+    }
+
+    $query = trim($title . ' ' . $address);
+
+    if ($embed === '') {
+        $q = preg_match('/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/', $link, $m)
+            ? $m[1] . ',' . $m[2]
+            : $query;
+
+        if ($q !== '') {
+            $embed = 'https://www.google.com/maps?q=' . rawurlencode($q) . '&output=embed';
+        }
+    }
+
+    if ($link === '' && $query !== '') {
+        $link = 'https://www.google.com/maps/search/?api=1&query=' . rawurlencode($query);
+    }
+
+    $b['raw_title']     = $rawTitle;
+    $b['is_junk']       = isJunkTitle($rawTitle);
+    $b['branch_number'] = $number === '' ? null : (int) $number;
+    $b['title']         = $title;
+    $b['address']       = $address;
+    $b['phone']         = $phone;
+    $b['hours']         = $hours;
+    $b['notes']         = $notes;
+    $b['map_link']      = $link;
+    $b['map_embed_url'] = $embed;
+
+    $missing = [];
+
+    foreach (['title', 'address', 'phone', 'hours', 'notes'] as $field) {
+        if ($b[$field] === '') {
+            $missing[] = $field;
+        }
+    }
+
+    $b['missing_fields'] = $missing;
+
+    return $b;
+}
+
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
@@ -40,11 +226,7 @@ if (!in_array($method, $allowedMethods, true)) {
     ]);
 }
 
-/*
-|--------------------------------------------------------------------------
-| 2. Konfigurasi API
-|--------------------------------------------------------------------------
-*/
+
 
 $configPath = __DIR__ . '/api-config.php';
 
@@ -68,11 +250,7 @@ if (
     ]);
 }
 
-/*
-|--------------------------------------------------------------------------
-| 3. Autentikasi Bearer Token
-|--------------------------------------------------------------------------
-*/
+
 
 $authorization = $_SERVER['HTTP_AUTHORIZATION']
     ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
@@ -106,11 +284,7 @@ if ($token === '' || !hash_equals(REI_API_TOKEN, $token)) {
     ]);
 }
 
-/*
-|--------------------------------------------------------------------------
-| 4. Koneksi database
-|--------------------------------------------------------------------------
-*/
+
 
 try {
     $databaseConfig = dirname(__DIR__) . '/config.php';
@@ -137,11 +311,6 @@ try {
     ]);
 }
 
-/*
-|--------------------------------------------------------------------------
-| 5. Periksa tabel dan kolom
-|--------------------------------------------------------------------------
-*/
 
 try {
     $tableCheck = $pdo->prepare(
@@ -172,31 +341,25 @@ try {
         ]);
     }
 
-    /*
-     * Kolom yang boleh dibaca atau ditulis melalui API.
-     * Kolom yang tidak ada di database akan diabaikan.
-     */
-    $allowedFields = [
-        'branch_number',
-        'title',
-        'address',
-        'phone',
-        'hours',
-        'notes',
-        'map_link',
-        'map_embed_url'
-    ];
+    $allowedFields = array_keys(BRANCH_COLUMN_ALIASES);
+    $lowerColumns = [];
 
-    $writableColumns = array_values(
-        array_intersect($allowedFields, $availableColumns)
-    );
+    foreach ($availableColumns as $col) {
+        $lowerColumns[strtolower((string) $col)] = $col;
+    }
 
-    $selectColumns = array_values(
-        array_intersect(
-            ['id', ...$allowedFields],
-            $availableColumns
-        )
-    );
+    $columnMap = [];
+
+    foreach (BRANCH_COLUMN_ALIASES as $canonical => $aliases) {
+        foreach ($aliases as $alias) {
+            if (isset($lowerColumns[$alias])) {
+                $columnMap[$canonical] = $lowerColumns[$alias];
+                break;
+            }
+        }
+    }
+
+    $writableColumns = array_keys($columnMap);
 
     if (empty($writableColumns)) {
         jsonResponse(500, [
@@ -205,19 +368,46 @@ try {
         ]);
     }
 
-    $selectSQL = implode(
-        ', ',
-        array_map(
-            static fn(string $column): string => '`' . $column . '`',
-            $selectColumns
-        )
-    );
+    $blocklistReady = false;
 
-    /*
-    |--------------------------------------------------------------------------
-    | 6. Ambil ID dari query string
-    |--------------------------------------------------------------------------
-    */
+    try {
+        $blCheck = $pdo->prepare(
+            'SELECT COUNT(*)
+             FROM information_schema.tables
+             WHERE table_schema = DATABASE()
+             AND table_name = ?'
+        );
+
+        $blCheck->execute(['branches_blocklist']);
+
+        if ((int) $blCheck->fetchColumn() === 0) {
+            $pdo->exec(
+                'CREATE TABLE `branches_blocklist` (
+                    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `block_key` VARCHAR(191) NOT NULL,
+                    `title` VARCHAR(255) NULL,
+                    `branch_number` VARCHAR(50) NULL,
+                    `reason` VARCHAR(255) NULL,
+                    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    UNIQUE KEY `uq_block_key` (`block_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+            );
+        }
+
+        $blocklistReady = true;
+    } catch (Throwable $e) {
+        error_log('[REI API CABANG][BLOCKLIST] ' . $e->getMessage());
+    }
+
+    $selectParts = ['`id`'];
+
+    foreach ($columnMap as $canonical => $actual) {
+        $selectParts[] = '`' . $actual . '` AS `' . $canonical . '`';
+    }
+
+    $selectSQL = implode(', ', $selectParts);
+
 
     $id = null;
 
@@ -237,11 +427,6 @@ try {
         $id = $parsedId;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 7. Baca dan validasi JSON request body
-    |--------------------------------------------------------------------------
-    */
 
     $readJsonBody = static function (): array {
         $raw = file_get_contents('php://input');
@@ -277,11 +462,88 @@ try {
         return $data;
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | 8. GET - daftar atau detail cabang
-    |--------------------------------------------------------------------------
-    */
+
+    if (strtolower((string) ($_GET['resource'] ?? '')) === 'blocklist') {
+        if (!$blocklistReady) {
+            jsonResponse(500, [
+                'success' => false,
+                'message' => 'Tabel branches_blocklist tidak tersedia dan tidak bisa dibuat otomatis.'
+            ]);
+        }
+
+        if ($method === 'GET') {
+            $rows = $pdo->query(
+                'SELECT `id`, `block_key`, `title`, `branch_number`, `reason`, `created_at`
+                 FROM `branches_blocklist`
+                 ORDER BY `id` DESC'
+            )->fetchAll();
+
+            jsonResponse(200, [
+                'success' => true,
+                'message' => 'Daftar blokir berhasil diambil.',
+                'data' => $rows
+            ]);
+        }
+
+        if ($method === 'POST') {
+            $input = $readJsonBody();
+            $title = trim((string) ($input['title'] ?? ''));
+            $key = blockKey($title);
+
+            if ($key === '') {
+                jsonResponse(422, [
+                    'success' => false,
+                    'message' => 'Judul wajib diisi untuk diblokir.'
+                ]);
+            }
+
+            $stmt = $pdo->prepare(
+                'INSERT IGNORE INTO `branches_blocklist` (`block_key`, `title`, `reason`)
+                 VALUES (:k, :t, :r)'
+            );
+
+            $stmt->execute([
+                'k' => $key,
+                't' => mb_substr($title, 0, 255, 'UTF-8'),
+                'r' => mb_substr((string) ($input['reason'] ?? 'Diblokir manual'), 0, 255, 'UTF-8'),
+            ]);
+
+            jsonResponse(201, [
+                'success' => true,
+                'message' => $stmt->rowCount() > 0
+                    ? 'Judul ditambahkan ke daftar blokir.'
+                    : 'Judul sudah ada di daftar blokir.',
+                'block_key' => $key
+            ]);
+        }
+
+        if ($method === 'DELETE') {
+            if ($id === null) {
+                jsonResponse(400, [
+                    'success' => false,
+                    'message' => 'ID blokir wajib diisi.'
+                ]);
+            }
+
+            $stmt = $pdo->prepare('DELETE FROM `branches_blocklist` WHERE `id` = :id');
+            $stmt->execute(['id' => $id]);
+
+            jsonResponse($stmt->rowCount() > 0 ? 200 : 404, [
+                'success' => $stmt->rowCount() > 0,
+                'message' => $stmt->rowCount() > 0
+                    ? 'Blokir dibuka.'
+                    : 'Data blokir tidak ditemukan.'
+            ]);
+        }
+
+        header('Allow: GET, POST, DELETE');
+
+        jsonResponse(405, [
+            'success' => false,
+            'message' => 'Method tidak diizinkan untuk blocklist.'
+        ]);
+    }
+
 
     if ($method === 'GET') {
         if ($id !== null) {
@@ -305,7 +567,7 @@ try {
             jsonResponse(200, [
                 'success' => true,
                 'message' => 'Detail cabang berhasil diambil.',
-                'data' => $branch
+                'data' => fillBranch($branch)
             ]);
         }
 
@@ -348,12 +610,8 @@ try {
             ->query('SELECT COUNT(*) FROM `branches`')
             ->fetchColumn();
 
-        $orderBy = in_array(
-            'branch_number',
-            $availableColumns,
-            true
-        )
-            ? '`branch_number` ASC, `id` ASC'
+        $orderBy = isset($columnMap['branch_number'])
+            ? 'CAST(`' . $columnMap['branch_number'] . '` AS UNSIGNED) ASC, `id` ASC'
             : '`id` DESC';
 
         $stmt = $pdo->prepare(
@@ -367,7 +625,7 @@ try {
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
 
-        $branches = $stmt->fetchAll();
+        $branches = array_map('fillBranch', $stmt->fetchAll());
 
         jsonResponse(200, [
             'success' => true,
@@ -383,11 +641,6 @@ try {
         ]);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 9. POST - tambah cabang
-    |--------------------------------------------------------------------------
-    */
 
     if ($method === 'POST') {
         $input = $readJsonBody();
@@ -426,12 +679,39 @@ try {
             }
         }
 
+        $incomingTitle = (string) ($data['title'] ?? '');
+        $skipReason = null;
+
+        if (REJECT_NUMERIC_TITLES && isJunkTitle($incomingTitle)) {
+            $skipReason = 'judul hanya berupa angka (bukan nama cabang).';
+        } elseif ($blocklistReady && ($incomingKey = blockKey($incomingTitle)) !== '') {
+            $blCheck = $pdo->prepare(
+                'SELECT COUNT(*) FROM `branches_blocklist` WHERE `block_key` = :k'
+            );
+
+            $blCheck->execute(['k' => $incomingKey]);
+
+            if ((int) $blCheck->fetchColumn() > 0) {
+                $skipReason = 'cabang ini ada di daftar blokir (pernah dihapus).';
+            }
+        }
+
+        if ($skipReason !== null) {
+            jsonResponse(200, [
+                'success' => true,
+                'skipped' => true,
+                'inserted' => false,
+                'message' => 'Dilewati: ' . $skipReason,
+                'title' => $incomingTitle
+            ]);
+        }
+
         $fields = array_keys($data);
 
         $quotedFields = implode(
             ', ',
             array_map(
-                static fn(string $field): string => '`' . $field . '`',
+                static fn(string $field): string => '`' . $columnMap[$field] . '`',
                 $fields
             )
         );
@@ -475,16 +755,11 @@ try {
             'success' => true,
             'message' => 'Cabang berhasil ditambahkan.',
             'data' => $branch !== false
-                ? $branch
+                ? fillBranch($branch)
                 : ['id' => $newId]
         ]);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 10. PUT / PATCH - edit cabang
-    |--------------------------------------------------------------------------
-    */
 
     if ($method === 'PUT' || $method === 'PATCH') {
         if ($id === null) {
@@ -546,7 +821,7 @@ try {
         $sets = [];
 
         foreach (array_keys($data) as $index => $field) {
-            $sets[] = '`' . $field . '` = :v' . $index;
+            $sets[] = '`' . $columnMap[$field] . '` = :v' . $index;
         }
 
         $sql = sprintf(
@@ -580,15 +855,10 @@ try {
         jsonResponse(200, [
             'success' => true,
             'message' => 'Data cabang berhasil diperbarui.',
-            'data' => $branch
+            'data' => $branch !== false ? fillBranch($branch) : $branch
         ]);
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 11. DELETE - hapus cabang
-    |--------------------------------------------------------------------------
-    */
 
     if ($method === 'DELETE') {
         if ($id === null) {
@@ -611,16 +881,68 @@ try {
             ]);
         }
 
+        $shouldBlock = !in_array(
+            strtolower((string) ($_GET['block'] ?? '1')),
+            ['0', 'false', 'no'],
+            true
+        );
+
         $stmt = $pdo->prepare(
-            'DELETE FROM `branches` WHERE `id` = :id'
+            "SELECT {$selectSQL} FROM `branches` WHERE `id` = :id LIMIT 1"
         );
 
         $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+
+        $key = $row !== false ? blockKey((string) ($row['title'] ?? '')) : '';
+        $blocked = false;
+
+        if ($shouldBlock && $key !== '' && !$blocklistReady) {
+            jsonResponse(500, [
+                'success' => false,
+                'message' => 'Tabel branches_blocklist tidak tersedia. Buat tabelnya atau hapus dengan ?block=0.'
+            ]);
+        }
+
+        $pdo->beginTransaction();
+
+        try {
+            if ($shouldBlock && $key !== '') {
+                $ins = $pdo->prepare(
+                    'INSERT IGNORE INTO `branches_blocklist`
+                        (`block_key`, `title`, `branch_number`, `reason`)
+                     VALUES (:k, :t, :n, :r)'
+                );
+
+                $ins->execute([
+                    'k' => $key,
+                    't' => mb_substr((string) ($row['title'] ?? ''), 0, 255, 'UTF-8'),
+                    'n' => isset($row['branch_number']) ? (string) $row['branch_number'] : null,
+                    'r' => 'Dihapus dari admin cabang',
+                ]);
+
+                $blocked = true;
+            }
+
+            $del = $pdo->prepare('DELETE FROM `branches` WHERE `id` = :id');
+            $del->execute(['id' => $id]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
 
         jsonResponse(200, [
             'success' => true,
-            'message' => 'Cabang berhasil dihapus.',
-            'deleted_id' => $id
+            'message' => $blocked
+                ? 'Cabang dihapus dan diblokir dari input ulang.'
+                : 'Cabang berhasil dihapus.',
+            'deleted_id' => $id,
+            'blocked' => $blocked
         ]);
     }
 

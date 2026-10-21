@@ -28,6 +28,11 @@ try {
 $page = $_GET['page'] ?? 'dashboard';
 $msg = '';
 $msg_setting = '';
+$sync_log = '';
+$sync_error = '';
+if (empty($_SESSION['branch_sync_csrf'])) {
+    $_SESSION['branch_sync_csrf'] = bin2hex(random_bytes(32));
+}
 
 // A. Proses Simpan Tema
 if ($page === 'theme' && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -151,14 +156,41 @@ if ($page === 'pages' && isset($_GET['delete_page'])) {
     exit;
 }
 
-// G. Proses Kelola Cabang Toko (Tambah, Edit, Hapus)
-if ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+// G. Proses Kelola Cabang Toko (Tambah, Edit, Hapus, Sinkronisasi)
+if ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($_POST['action'] ?? '') === 'sync_branches') {
+    $csrf = (string) ($_POST['csrf_token'] ?? '');
+    if (!hash_equals((string) $_SESSION['branch_sync_csrf'], $csrf)) {
+        http_response_code(403);
+        $sync_error = 'Token keamanan tidak valid. Muat ulang halaman lalu coba lagi.';
+    } else {
+        $scraper_file = __DIR__ . DIRECTORY_SEPARATOR . 'scrape-branches.php';
+        if (!is_file($scraper_file)) {
+            $sync_error = 'File scrape-branches.php tidak ditemukan di folder utama REI CMS.';
+        } else {
+            @set_time_limit(180);
+            ob_start();
+            try {
+                require_once $scraper_file;
+                main();
+                $sync_log = (string) ob_get_contents();
+                $msg = 'Sinkronisasi cabang selesai. Periksa ringkasan hasil di bawah.';
+            } catch (Throwable $e) {
+                $sync_log = (string) ob_get_contents();
+                $sync_error = $e->getMessage();
+            } finally {
+                ob_end_clean();
+            }
+            $_SESSION['branch_sync_csrf'] = bin2hex(random_bytes(32));
+        }
+    }
+} elseif ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action']) && $_POST['action'] === 'edit') {
         $stmt = $pdo->prepare("UPDATE branches SET branch_number = ?, title = ?, address = ?, phone = ?, hours = ?, notes = ?, map_embed_url = ?, map_link = ? WHERE id = ?");
         $stmt->execute([
             $_POST['branch_number'], $_POST['title'], $_POST['address'], 
             $_POST['phone'], $_POST['hours'], $_POST['notes'], 
-            $_POST['map_embed_url'], $_POST['map_link'], $_POST['branch_id']
+            $_POST['map_embed_url'] ?? '', $_POST['map_link'] ?? '', $_POST['branch_id']
         ]);
         $msg = "Cabang toko berhasil diperbarui!";
     } else {
@@ -166,7 +198,7 @@ if ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([
             $_POST['branch_number'], $_POST['title'], $_POST['address'], 
             $_POST['phone'], $_POST['hours'], $_POST['notes'], 
-            $_POST['map_embed_url'], $_POST['map_link']
+            $_POST['map_embed_url'] ?? '', $_POST['map_link'] ?? ''
         ]);
         $msg = "Cabang toko berhasil ditambahkan!";
     }
@@ -417,7 +449,25 @@ foreach($chart_data as $cd) {
                     </script>
 
                 <?php elseif ($page === 'branches'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($sync_error): ?><div class='mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium'><strong>Sinkronisasi gagal:</strong> <?= htmlspecialchars($sync_error) ?></div><?php endif; ?>
+                    <div class="mb-6 bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <h3 class="font-semibold text-gray-800 flex items-center gap-2"><span class="material-icons text-cyan-600">sync</span> Sinkronisasi Data Cabang</h3>
+                            <p class="text-sm text-gray-500 mt-1">Ambil data cabang terbaru dari website Raja Emas Indonesia dan perbarui database.</p>
+                        </div>
+                        <form method="POST" onsubmit="const b=this.querySelector('button');b.disabled=true;b.innerHTML='Menyinkronkan...';" class="shrink-0">
+                            <input type="hidden" name="action" value="sync_branches">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars((string) $_SESSION['branch_sync_csrf'], ENT_QUOTES, 'UTF-8') ?>">
+                            <button type="submit" class="inline-flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white text-sm font-semibold px-5 py-3 rounded-xl shadow-md transition"><span class="material-icons text-lg">sync</span> Sinkronisasi Cabang</button>
+                        </form>
+                    </div>
+                    <?php if($sync_log !== ''): ?>
+                        <div class="mb-6 bg-gray-950 text-green-300 p-5 rounded-2xl shadow-sm overflow-hidden">
+                            <h3 class="text-white font-semibold mb-3">Log Sinkronisasi</h3>
+                            <pre class="text-xs leading-relaxed whitespace-pre-wrap break-words overflow-x-auto max-h-[520px]"><?= htmlspecialchars($sync_log, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></pre>
+                        </div>
+                    <?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm h-fit">
@@ -476,13 +526,36 @@ foreach($chart_data as $cd) {
                         </div>
 
                         <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Daftar & Pratinjau Cabang Toko</h3>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-5">
+                                <div>
+                                    <h3 class="font-semibold text-gray-800">Daftar & Pratinjau Cabang Toko</h3>
+                                    <p class="text-xs text-gray-500 mt-1">Filter khusus berdasarkan nomor cabang, nama cabang, atau nomor WhatsApp.</p>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 w-full md:w-auto">
+                                    <select id="branchFilterType" aria-label="Jenis filter cabang" class="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                                        <option value="branch_number">No. Cabang</option>
+                                        <option value="title">Nama Cabang</option>
+                                        <option value="phone">No. WA Cabang</option>
+                                    </select>
+                                    <div class="relative">
+                                        <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span>
+                                        <input type="search" id="branchSearchInput" placeholder="Masukkan kata kunci..." aria-label="Kata kunci filter cabang" class="w-full pl-10 pr-3 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500">
+                                    </div>
+                                    <button type="button" id="branchFilterButton" class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-semibold transition">
+                                        <span class="material-icons text-lg">filter_list</span> Filter
+                                    </button>
+                                    <button type="button" id="branchResetButton" class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold transition">
+                                        <span class="material-icons text-lg">restart_alt</span> Reset
+                                    </button>
+                                </div>
+                            </div>
+                            <p id="branchSearchResult" class="text-sm text-gray-500 mb-4" aria-live="polite"></p>
+                            <div id="branchCardsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <?php if(empty($branches_list)): ?>
                                     <p class="text-sm text-gray-400 italic col-span-2">Belum ada cabang toko yang ditambahkan.</p>
                                 <?php else: ?>
                                     <?php foreach($branches_list as$b): ?>
-                                    <div class="border-2 border-[#3b1c32] rounded-[30px] p-6 flex flex-col justify-between bg-white shadow-sm relative">
+                                    <div class="branch-card border-2 border-[#3b1c32] rounded-[30px] p-6 flex flex-col justify-between bg-white shadow-sm relative" data-branch-number="<?= htmlspecialchars(mb_strtolower((string)($b['branch_number'] ?? ''), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>" data-title="<?= htmlspecialchars(mb_strtolower((string)($b['title'] ?? ''), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>" data-phone="<?= htmlspecialchars(mb_strtolower((string)($b['phone'] ?? ''), 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>">
                                         <div>
                                             <div class="flex justify-between items-start mb-3">
                                                 <div>
@@ -680,6 +753,73 @@ foreach($chart_data as $cd) {
     </div>
 
     <script>
+        // Filter daftar cabang berdasarkan nomor, nama, atau nomor WhatsApp.
+        (function () {
+            const input = document.getElementById('branchSearchInput');
+            const type = document.getElementById('branchFilterType');
+            const filterButton = document.getElementById('branchFilterButton');
+            const resetButton = document.getElementById('branchResetButton');
+            const result = document.getElementById('branchSearchResult');
+            const cards = Array.from(document.querySelectorAll('.branch-card'));
+            if (!input || !type || !filterButton || !resetButton || !result) return;
+
+            const placeholders = {
+                branch_number: 'Masukkan nomor cabang...',
+                title: 'Masukkan nama cabang...',
+                phone: 'Masukkan nomor WA cabang...'
+            };
+            const labels = {
+                branch_number: 'nomor cabang',
+                title: 'nama cabang',
+                phone: 'nomor WA cabang'
+            };
+
+            function applyBranchFilter() {
+                const keyword = input.value.trim().toLocaleLowerCase('id-ID');
+                const field = 'branch' + (type.value === 'branch_number' ? 'Number' : type.value === 'title' ? 'Title' : 'Phone');
+                let visible = 0;
+                cards.forEach(function (card) {
+                    const value = (card.dataset[field] || '').toLocaleLowerCase('id-ID');
+                    const match = keyword === '' || value.includes(keyword);
+                    card.classList.toggle('hidden', !match);
+                    if (match) visible++;
+                });
+                result.textContent = keyword
+                    ? 'Menampilkan ' + visible + ' dari ' + cards.length + ' cabang berdasarkan ' + labels[type.value] + ' “' + input.value.trim() + '”.'
+                    : 'Menampilkan ' + visible + ' cabang. Pilih jenis filter dan masukkan kata kunci untuk menyaring daftar.';
+                let empty = document.getElementById('branchNoResults');
+                if (visible === 0 && cards.length > 0) {
+                    if (!empty) {
+                        empty = document.createElement('p');
+                        empty.id = 'branchNoResults';
+                        empty.className = 'col-span-full rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500';
+                        empty.textContent = 'Tidak ada cabang yang cocok dengan filter tersebut.';
+                        document.getElementById('branchCardsGrid')?.appendChild(empty);
+                    }
+                } else if (empty) {
+                    empty.remove();
+                }
+            }
+
+            type.addEventListener('change', function () {
+                input.placeholder = placeholders[type.value] || 'Masukkan kata kunci...';
+                if (input.value.trim()) applyBranchFilter();
+            });
+            filterButton.addEventListener('click', applyBranchFilter);
+            input.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') { event.preventDefault(); applyBranchFilter(); }
+            });
+            resetButton.addEventListener('click', function () {
+                input.value = '';
+                type.value = 'branch_number';
+                input.placeholder = placeholders.branch_number;
+                applyBranchFilter();
+                input.focus();
+            });
+            input.addEventListener('input', applyBranchFilter);
+            applyBranchFilter();
+        })();
+
         function toggleSubmenu(submenuId, arrowId) {
             const submenu = document.getElementById(submenuId);
             const arrow = document.getElementById(arrowId);

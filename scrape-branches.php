@@ -1048,18 +1048,26 @@ function main(): void
     echo "\nSelesai.\n";
 }
 
-try {
-    main();
-} catch (Throwable $e) {
-    if (PHP_SAPI === 'cli') {
-        fwrite(STDERR, "\nERROR: " . $e->getMessage() . "\n");
-        exit(1);
-    }
+// Eksekusi otomatis hanya jika file scraper dibuka langsung.
+// Saat dipanggil dari admin.php, fungsi main() dijalankan oleh tombol sinkronisasi.
+$isDirectExecution = PHP_SAPI === 'cli'
+    || (isset($_SERVER['SCRIPT_FILENAME'])
+        && realpath((string) $_SERVER['SCRIPT_FILENAME']) === realpath(__FILE__));
 
-    http_response_code(500);
-    echo 'ERROR: ' . htmlspecialchars(
-        $e->getMessage(),
-        ENT_QUOTES,
-        'UTF-8'
-    );
+if ($isDirectExecution) {
+    try {
+        main();
+    } catch (Throwable $e) {
+        if (PHP_SAPI === 'cli') {
+            fwrite(STDERR, "\nERROR: " . $e->getMessage() . "\n");
+            exit(1);
+        }
+
+        http_response_code(500);
+        echo 'ERROR: ' . htmlspecialchars(
+            $e->getMessage(),
+            ENT_QUOTES,
+            'UTF-8'
+        );
+    }
 }
