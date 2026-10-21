@@ -14,13 +14,10 @@ const DB_USER = 'admin_cms';
 const DB_PASS = 'M@juterusrajaemas';
 
 const DB_TABLE = 'branches';
-const DB_TABLE = 'branches';
 
 const DELETE_MISSING = true;
 
-// Pengaman: jika hasil parsing kurang dari rasio ini dibanding jumlah
-// cabang di DB (dan DB berisi minimal DELETE_GUARD_MIN_ROWS baris),
-// penghapusan dibatalkan karena kemungkinan besar parsing/halaman gagal.
+
 const DELETE_MIN_KEEP_RATIO = 0.5;
 const DELETE_GUARD_MIN_ROWS = 4;
 
