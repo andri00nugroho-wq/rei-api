@@ -18,12 +18,7 @@ declare(strict_types=1);
 const SOURCE_URL = 'https://rajaemasindonesia.co.id/';
 const DEBUG_FILE = __DIR__ . '/debug-branches.html';
 
-// Sesuaikan dengan konfigurasi database Laragon Anda.
-const DB_HOST = '127.0.0.1';
-const DB_PORT = '3306';
-const DB_NAME = 'rei_cms_v1';
-const DB_USER = 'root';
-const DB_PASS = '';
+require_once __DIR__ . '/config.php';
 
 const DB_TABLE = 'branches';
 
