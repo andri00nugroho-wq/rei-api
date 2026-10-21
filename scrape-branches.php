@@ -26,7 +26,7 @@ const SOURCE_URL = 'https://rajaemasindonesia.co.id/#lokasi';
 const DB_HOST = '127.0.0.1';
 const DB_PORT = '3306';
 const DB_NAME = 'rei_cms_v1';
-const DB_USER = 'radmin_cms';
+const DB_USER = 'admin_cms';
 const DB_PASS = 'M@juterusrajaemas';
 
 const DB_TABLE = 'branches';
