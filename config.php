@@ -4,8 +4,8 @@
 $host = '127.0.0.1';
 $port = 3306;
 $dbname = 'rei_cms_v1';
-$user = 'root';
-$pass = ''; 
+$user = 'admin_cms';
+$pass = 'M@juterusrajaemas'; 
 
 try {
     $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
