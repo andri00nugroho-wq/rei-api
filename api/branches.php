@@ -213,6 +213,91 @@ function fillBranch(array $b): array
 }
 
 
+/**
+ * Ambil nilai header request dari berbagai sumber.
+ * Hosting (CGI/FastCGI/LiteSpeed) sering membuang header Authorization
+ * dari $_SERVER, jadi semua jalur alternatif dicek satu per satu.
+ */
+function getRequestHeader(string $name): string
+{
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $name));
+
+    foreach ([$serverKey, 'REDIRECT_' . $serverKey, 'REDIRECT_REDIRECT_' . $serverKey] as $key) {
+        if (!empty($_SERVER[$key]) && is_string($_SERVER[$key])) {
+            return trim($_SERVER[$key]);
+        }
+    }
+
+    $sources = [];
+
+    if (function_exists('getallheaders')) {
+        $h = getallheaders();
+        if (is_array($h)) {
+            $sources[] = $h;
+        }
+    }
+
+    if (function_exists('apache_request_headers')) {
+        $h = apache_request_headers();
+        if (is_array($h)) {
+            $sources[] = $h;
+        }
+    }
+
+    foreach ($sources as $headers) {
+        foreach ($headers as $hName => $hValue) {
+            if (strcasecmp((string) $hName, $name) === 0 && is_string($hValue) && trim($hValue) !== '') {
+                return trim($hValue);
+            }
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Ambil token API dari request.
+ * Urutan: Authorization: Bearer ... lalu X-API-Token / X-Authorization.
+ * Mengembalikan [token, headerTerbaca].
+ */
+function extractApiToken(): array
+{
+    $authorization = getRequestHeader('Authorization');
+    $received = $authorization !== '';
+
+    if ($authorization !== '' && preg_match('/^Bearer\s+(.+)$/i', $authorization, $m)) {
+        return [trim($m[1]), true];
+    }
+
+    foreach (['X-API-Token', 'X-Authorization', 'X-Auth-Token'] as $custom) {
+        $value = getRequestHeader($custom);
+
+        if ($value !== '') {
+            $received = true;
+
+            if (preg_match('/^Bearer\s+(.+)$/i', $value, $m)) {
+                return [trim($m[1]), true];
+            }
+
+            return [$value, true];
+        }
+    }
+
+    return ['', $received];
+}
+
+/**
+ * Bersihkan token dari konfigurasi (spasi, baris baru, tanda kutip nyasar).
+ */
+function normalizeToken(string $token): string
+{
+    $token = trim($token);
+    $token = trim($token, "\"'");
+
+    return trim($token);
+}
+
+
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 $allowedMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -242,7 +327,7 @@ require_once $configPath;
 if (
     !defined('REI_API_TOKEN')
     || !is_string(REI_API_TOKEN)
-    || REI_API_TOKEN === ''
+    || normalizeToken(REI_API_TOKEN) === ''
 ) {
     jsonResponse(500, [
         'success' => false,
@@ -250,37 +335,22 @@ if (
     ]);
 }
 
+$expectedToken = normalizeToken(REI_API_TOKEN);
 
 
-$authorization = $_SERVER['HTTP_AUTHORIZATION']
-    ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-    ?? '';
 
-if ($authorization === '' && function_exists('getallheaders')) {
-    foreach (getallheaders() as $name => $value) {
-        if (strcasecmp($name, 'Authorization') === 0) {
-            $authorization = $value;
-            break;
-        }
-    }
-}
+[$token, $authHeaderReceived] = extractApiToken();
+$token = normalizeToken($token);
 
-$token = '';
+if ($token === '' || !hash_equals($expectedToken, $token)) {
+    header('WWW-Authenticate: Bearer realm="REI API"');
 
-if (
-    preg_match(
-        '/^Bearer\s+(.+)$/i',
-        trim($authorization),
-        $matches
-    )
-) {
-    $token = trim($matches[1]);
-}
-
-if ($token === '' || !hash_equals(REI_API_TOKEN, $token)) {
     jsonResponse(401, [
         'success' => false,
-        'message' => 'API token tidak valid.'
+        'message' => 'API token tidak valid.',
+        'hint' => !$authHeaderReceived
+            ? 'Header Authorization tidak sampai ke PHP. Tambahkan aturan di .htaccess atau kirim lewat header X-API-Token.'
+            : 'Token yang dikirim tidak sama dengan REI_API_TOKEN di server.'
     ]);
 }
 
