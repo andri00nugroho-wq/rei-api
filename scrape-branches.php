@@ -1,18 +1,38 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Scraper cabang Raja Emas Indonesia -> database MySQL.
+ *
+ * Perubahan untuk production (Plesk):
+ *  - Password database TIDAK lagi ditulis di file ini.
+ *    Koneksi diambil dari config.php (sama dengan yang dipakai admin.php dan API).
+ *    Cadangan: file db-local.php (return array) atau environment REI_DB_*.
+ *  - Host default "localhost" (user database Plesk biasanya hanya boleh dari localhost),
+ *    lalu otomatis mencoba 127.0.0.1.
+ *  - Tabel hanya dibuat jika belum ada, dan kegagalan CREATE (hak akses) tidak
+ *    menghentikan proses jika tabel sudah tersedia.
+ *  - Kompatibel PHP 7.4+ (str_contains / str_starts_with diberi pengganti).
+ */
+
+if (!function_exists('str_contains')) {
+    function str_contains(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strpos($haystack, $needle) !== false;
+    }
+}
+
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(string $haystack, string $needle): bool
+    {
+        return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
+    }
+}
 
 const SOURCE_URL = 'https://rajaemasindonesia.co.id/#lokasi';
 const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 
-// Sesuaikan dengan konfigurasi database Laragon Anda.
-// PENTING: harus database yang sama dengan yang dibaca halaman admin/CMS.
-const DB_HOST = '127.0.0.1';
-const DB_PORT = '3306';
-const DB_NAME = 'rei_cms_v1';
-const DB_USER = 'admin_cms';
-const DB_PASS = 'M@juterusrajaemas';
-
+// Nama tabel cabang. Harus sama dengan yang dibaca halaman admin/CMS dan API.
 const DB_TABLE = 'branches';
 
 const DELETE_MISSING = true;
@@ -55,20 +75,106 @@ const DIRECTION_LABEL_REGEX =
 // 2. KONEKSI DATABASE
 // =====================================================
 
+/**
+ * Memuat config.php dan mengambil variabel $pdo-nya.
+ * Output liar (echo/spasi/BOM) dari config.php dibuang.
+ */
+function loadConfigPdo(string $path): ?PDO
+{
+    $loader = static function (string $file) {
+        require $file;
+
+        return (isset($pdo) && $pdo instanceof PDO) ? $pdo : null;
+    };
+
+    ob_start();
+
+    try {
+        return $loader($path);
+    } finally {
+        ob_end_clean();
+    }
+}
+
 function connectDatabase(): PDO
 {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        DB_HOST,
-        DB_PORT,
-        DB_NAME
-    );
+    $errors = [];
 
-    return new PDO($dsn, DB_USER, DB_PASS, [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES   => false,
-    ]);
+    // 1) Pakai config.php (sama dengan admin.php dan API) agar selalu satu database.
+    foreach ([__DIR__ . '/config.php', dirname(__DIR__) . '/config.php'] as $path) {
+        if (!is_file($path)) {
+            continue;
+        }
+
+        try {
+            $pdo = loadConfigPdo($path);
+
+            if ($pdo instanceof PDO) {
+                $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+                return $pdo;
+            }
+
+            $errors[] = $path . ' tidak mendefinisikan variabel $pdo.';
+        } catch (Throwable $e) {
+            $errors[] = $path . ': ' . $e->getMessage();
+        }
+    }
+
+    // 2) Cadangan: db-local.php atau environment.
+    $local = [];
+    $localFile = __DIR__ . '/db-local.php';
+
+    if (is_file($localFile)) {
+        $loaded = require $localFile;
+
+        if (is_array($loaded)) {
+            $local = $loaded;
+        }
+    }
+
+    $host = (string) ($local['host'] ?? (getenv('REI_DB_HOST') ?: 'localhost'));
+    $port = (string) ($local['port'] ?? (getenv('REI_DB_PORT') ?: '3306'));
+    $name = (string) ($local['name'] ?? (getenv('REI_DB_NAME') ?: ''));
+    $user = (string) ($local['user'] ?? (getenv('REI_DB_USER') ?: ''));
+    $pass = (string) ($local['pass'] ?? (getenv('REI_DB_PASS') ?: ''));
+
+    if ($name === '' || $user === '') {
+        throw new RuntimeException(
+            'Koneksi database tidak ditemukan. Pastikan config.php (dengan variabel $pdo) '
+            . 'ada di server, atau buat db-local.php. Detail: ' . implode(' | ', $errors)
+        );
+    }
+
+    $hosts = [$host];
+
+    if ($host === 'localhost') {
+        $hosts[] = '127.0.0.1';
+    }
+
+    $lastError = null;
+
+    foreach ($hosts as $h) {
+        try {
+            return new PDO(
+                sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $h, $port, $name),
+                $user,
+                $pass,
+                [
+                    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES   => false,
+                ]
+            );
+        } catch (PDOException $e) {
+            $lastError = $e;
+        }
+    }
+
+    throw new RuntimeException(
+        'Koneksi database gagal: ' . ($lastError ? $lastError->getMessage() : 'tidak diketahui')
+    );
 }
 
 // =====================================================
@@ -112,7 +218,7 @@ function fetchWebsite(string $url, callable $log): string
 {
     if (!function_exists('curl_init')) {
         throw new RuntimeException(
-            'Ekstensi cURL belum aktif. Aktifkan extension=curl di php.ini Laragon.'
+            'Ekstensi cURL belum aktif. Aktifkan ekstensi curl di PHP Settings (Plesk) atau php.ini.'
         );
     }
 
@@ -125,7 +231,7 @@ function fetchWebsite(string $url, callable $log): string
 
     $result = curlGet($requestUrl, true);
 
-    // Laragon/Windows sering belum punya sertifikat CA (cURL error 60/77).
+    // Server tanpa sertifikat CA yang lengkap sering gagal (cURL error 60/77).
     // Karena yang diambil hanya halaman publik, ulangi tanpa verifikasi SSL.
     // Perbaikan permanen: set curl.cainfo di php.ini ke file cacert.pem.
     if ($result['body'] === false && in_array($result['errno'], [60, 77], true)) {
@@ -784,7 +890,7 @@ function parseBranches(string $html, callable $log): array
 {
     if (!class_exists(DOMDocument::class)) {
         throw new RuntimeException(
-            'Ekstensi PHP DOM belum aktif. Aktifkan extension=dom di php.ini.'
+            'Ekstensi PHP DOM belum aktif. Aktifkan ekstensi dom di PHP Settings (Plesk) atau php.ini.'
         );
     }
 
@@ -907,8 +1013,9 @@ function parseBranches(string $html, callable $log): array
 
     uasort(
         $branches,
-        static fn(array $a, array $b): int =>
-            (int) $a['branch_number'] <=> (int) $b['branch_number']
+        static function (array $a, array $b): int {
+            return (int) $a['branch_number'] <=> (int) $b['branch_number'];
+        }
     );
 
     return array_values($branches);
@@ -921,7 +1028,9 @@ function diagnoseBranches(array $branches, callable $log): void
     }
 
     $numbers = array_map(
-        static fn(array $b): int => (int) $b['branch_number'],
+        static function (array $b): int {
+            return (int) $b['branch_number'];
+        },
         $branches
     );
 
@@ -930,7 +1039,9 @@ function diagnoseBranches(array $branches, callable $log): void
 
     $last = array_slice($branches, -3);
     $labels = array_map(
-        static fn(array $b): string => $b['branch_number'] . ' ' . $b['title'],
+        static function (array $b): string {
+            return $b['branch_number'] . ' ' . $b['title'];
+        },
         $last
     );
     $log('3 cabang terakhir terbaca: ' . implode(' | ', $labels));
@@ -969,22 +1080,40 @@ function diagnoseBranches(array $branches, callable $log): void
 
 function ensureTable(PDO $pdo): void
 {
-    // Skema sama dengan tabel yang dibuat admin.php. Sengaja TANPA indeks unik
-    // dan tanpa mengubah struktur tabel yang sudah ada.
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `" . DB_TABLE . "` (
-            `id` INT AUTO_INCREMENT PRIMARY KEY,
-            `branch_number` VARCHAR(10) NOT NULL,
-            `title` VARCHAR(255) NOT NULL,
-            `address` TEXT NOT NULL,
-            `phone` VARCHAR(50) NOT NULL,
-            `hours` VARCHAR(100) NOT NULL,
-            `notes` VARCHAR(255) DEFAULT NULL,
-            `map_embed_url` TEXT NOT NULL,
-            `map_link` TEXT NOT NULL,
-            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    ");
+    // Jika tabel sudah ada (misalnya hasil import di Plesk), jangan disentuh.
+    $check = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.tables
+         WHERE table_schema = DATABASE() AND table_name = :table_name'
+    );
+
+    $check->execute([':table_name' => DB_TABLE]);
+
+    if ((int) $check->fetchColumn() > 0) {
+        return;
+    }
+
+    // Skema sama dengan tabel yang dibuat admin.php. Sengaja TANPA indeks unik.
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `" . DB_TABLE . "` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `branch_number` VARCHAR(10) NOT NULL,
+                `title` VARCHAR(255) NOT NULL,
+                `address` TEXT NOT NULL,
+                `phone` VARCHAR(50) NOT NULL,
+                `hours` VARCHAR(100) NOT NULL,
+                `notes` VARCHAR(255) DEFAULT NULL,
+                `map_embed_url` TEXT NOT NULL,
+                `map_link` TEXT NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        ");
+    } catch (PDOException $e) {
+        throw new RuntimeException(
+            'Tabel ' . DB_TABLE . ' tidak ada dan tidak bisa dibuat (cek hak akses user database / import dump). '
+            . $e->getMessage()
+        );
+    }
 }
 
 function tableHasColumn(PDO $pdo, string $column): bool
@@ -1112,7 +1241,9 @@ function syncBranch(PDO $pdo, array $branch): string
     }
 
     $placeholders = array_map(
-        static fn(string $column): string => ':' . $column,
+        static function (string $column): string {
+            return ':' . $column;
+        },
         $columns
     );
 
@@ -1394,9 +1525,7 @@ function isDirectExecution(): bool
 
 if (isDirectExecution()) {
     if (PHP_SAPI !== 'cli') {
-        // Akses langsung lewat browser hanya diizinkan dari komputer lokal,
-        // karena proses ini bisa menghapus data. Di server publik, panggil
-        // runSync() dari admin.php setelah cek login + CSRF.
+    
         $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 
         if (!in_array($remote, ['127.0.0.1', '::1'], true)) {
