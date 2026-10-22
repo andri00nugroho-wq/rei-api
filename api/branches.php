@@ -1,11 +1,40 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * REI API Cabang - versi kompatibel production.
+ *
+ * Perubahan utama dibanding versi sebelumnya:
+ *  - Kompatibel PHP 7.4+ (tanpa `never`, `mixed`, `array_is_list` bawaan).
+ *  - config.php dicari di beberapa lokasi (hosting sering beda struktur folder).
+ *  - Output liar dari config.php (echo/warning) dibuang supaya JSON tetap bersih.
+ *  - Variabel koneksi diterima: $pdo / $db / $conn / $dbh (jika bertipe PDO).
+ *  - Endpoint diagnosa: GET ?resource=health (butuh token).
+ *  - Mode debug opsional: define('REI_API_DEBUG', true); di api-config.php
+ *    (matikan lagi setelah masalah ketemu).
+ */
+
+@ini_set('display_errors', '0');
+error_reporting(E_ALL);
+
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
-function jsonResponse(int $status, array $data): never
+if (!function_exists('array_is_list')) {
+    function array_is_list(array $array): bool
+    {
+        $i = 0;
+        foreach ($array as $k => $_) {
+            if ($k !== $i++) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+function jsonResponse(int $status, array $data)
 {
     http_response_code($status);
 
@@ -17,6 +46,18 @@ function jsonResponse(int $status, array $data): never
     );
 
     exit;
+}
+
+/**
+ * Info debug hanya muncul jika REI_API_DEBUG === true di api-config.php.
+ */
+function debugInfo(Throwable $e): array
+{
+    if (defined('REI_API_DEBUG') && REI_API_DEBUG === true) {
+        return ['debug' => get_class($e) . ': ' . $e->getMessage()];
+    }
+
+    return [];
 }
 
 
@@ -31,7 +72,7 @@ const BRANCH_COLUMN_ALIASES = [
     'map_embed_url' => ['map_embed_url', 'map_embed', 'embed_peta', 'embed_url'],
 ];
 
-function cleanText(mixed $v): string
+function cleanText($v): string
 {
     $s = trim((string) ($v ?? ''));
 
@@ -106,19 +147,20 @@ function mapQuery(string $url): string
 
 function fillBranch(array $b): array
 {
-    $title   = cleanText($b['title'] ?? '');
+    $title    = cleanText($b['title'] ?? '');
     $rawTitle = $title;
-    $number  = cleanText($b['branch_number'] ?? '');
-    $address = cleanText($b['address'] ?? '');
-    $phone   = cleanText($b['phone'] ?? '');
-    $hours   = cleanText($b['hours'] ?? '');
-    $notes   = cleanText($b['notes'] ?? '');
-    $link    = trim((string) ($b['map_link'] ?? ''));
-    $embed   = trim((string) ($b['map_embed_url'] ?? ''));
+    $number   = cleanText($b['branch_number'] ?? '');
+    $address  = cleanText($b['address'] ?? '');
+    $phone    = cleanText($b['phone'] ?? '');
+    $hours    = cleanText($b['hours'] ?? '');
+    $notes    = cleanText($b['notes'] ?? '');
+    $link     = trim((string) ($b['map_link'] ?? ''));
+    $embed    = trim((string) ($b['map_embed_url'] ?? ''));
 
     if ($embed !== '' && preg_match('/src=["\']([^"\']+)["\']/i', $embed, $m)) {
         $embed = html_entity_decode($m[1]);
     }
+
     if (
         preg_match('/^(.*?)\s*No\.\s*(\d+)$/u', $title, $m)
         || preg_match('/^(.*?)\s+No\s+(\d+)$/u', $title, $m)
@@ -312,6 +354,9 @@ if (!in_array($method, $allowedMethods, true)) {
 }
 
 
+/* ---------------------------------------------------------------
+ * Konfigurasi API (token)
+ * ------------------------------------------------------------- */
 
 $configPath = __DIR__ . '/api-config.php';
 
@@ -338,6 +383,9 @@ if (
 $expectedToken = normalizeToken(REI_API_TOKEN);
 
 
+/* ---------------------------------------------------------------
+ * Autentikasi
+ * ------------------------------------------------------------- */
 
 [$token, $authHeaderReceived] = extractApiToken();
 $token = normalizeToken($token);
@@ -355,32 +403,72 @@ if ($token === '' || !hash_equals($expectedToken, $token)) {
 }
 
 
+/* ---------------------------------------------------------------
+ * Koneksi database
+ * ------------------------------------------------------------- */
+
+$databaseConfigUsed = null;
 
 try {
-    $databaseConfig = dirname(__DIR__) . '/config.php';
+    $candidates = [
+        dirname(__DIR__) . '/config.php',
+        __DIR__ . '/config.php',
+        dirname(__DIR__, 2) . '/config.php',
+    ];
 
-    if (!is_file($databaseConfig)) {
-        throw new RuntimeException('File config.php tidak ditemukan.');
+    if (!empty($_SERVER['DOCUMENT_ROOT']) && is_string($_SERVER['DOCUMENT_ROOT'])) {
+        $candidates[] = rtrim($_SERVER['DOCUMENT_ROOT'], '/\\') . '/config.php';
     }
 
-    require_once $databaseConfig;
+    foreach ($candidates as $candidate) {
+        if (is_file($candidate)) {
+            $databaseConfigUsed = $candidate;
+            break;
+        }
+    }
+
+    if ($databaseConfigUsed === null) {
+        throw new RuntimeException('File config.php tidak ditemukan. Dicari di: ' . implode(' | ', $candidates));
+    }
+
+    // Buang output liar (echo/warning/BOM) dari config.php agar JSON tetap valid.
+    ob_start();
+    require_once $databaseConfigUsed;
+    ob_end_clean();
 
     if (!isset($pdo) || !($pdo instanceof PDO)) {
-        throw new RuntimeException('Koneksi PDO $pdo tidak ditemukan.');
+        foreach (['db', 'conn', 'dbh', 'database'] as $alt) {
+            if (isset($$alt) && $$alt instanceof PDO) {
+                $pdo = $$alt;
+                break;
+            }
+        }
+    }
+
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
+        throw new RuntimeException('Koneksi PDO $pdo tidak ditemukan di ' . $databaseConfigUsed . '.');
     }
 
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
 } catch (Throwable $e) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
     error_log('[REI API CABANG][DATABASE] ' . $e->getMessage());
 
-    jsonResponse(500, [
+    jsonResponse(500, array_merge([
         'success' => false,
         'message' => 'Koneksi database gagal.'
-    ]);
+    ], debugInfo($e)));
 }
 
+
+/* ---------------------------------------------------------------
+ * Logika utama
+ * ------------------------------------------------------------- */
 
 try {
     $tableCheck = $pdo->prepare(
@@ -393,9 +481,17 @@ try {
     $tableCheck->execute(['branches']);
 
     if ((int) $tableCheck->fetchColumn() === 0) {
+        $currentDb = null;
+
+        try {
+            $currentDb = $pdo->query('SELECT DATABASE()')->fetchColumn();
+        } catch (Throwable $ignored) {
+        }
+
         jsonResponse(404, [
             'success' => false,
-            'message' => 'Tabel branches tidak ditemukan.'
+            'message' => 'Tabel branches tidak ditemukan.',
+            'hint' => 'Database yang sedang dipakai: ' . ($currentDb ?: '(tidak ada)') . '. Pastikan tabel branches sudah di-import ke database ini.'
         ]);
     }
 
@@ -434,7 +530,8 @@ try {
     if (empty($writableColumns)) {
         jsonResponse(500, [
             'success' => false,
-            'message' => 'Kolom cabang yang bisa ditulis tidak ditemukan.'
+            'message' => 'Kolom cabang yang bisa ditulis tidak ditemukan.',
+            'hint' => 'Kolom yang ada di tabel: ' . implode(', ', $availableColumns)
         ]);
     }
 
@@ -531,6 +628,39 @@ try {
 
         return $data;
     };
+
+
+    /* -----------------------------------------------------------
+     * Endpoint diagnosa: GET ?resource=health  (butuh token)
+     * --------------------------------------------------------- */
+    if (strtolower((string) ($_GET['resource'] ?? '')) === 'health') {
+        if ($method !== 'GET') {
+            header('Allow: GET');
+
+            jsonResponse(405, [
+                'success' => false,
+                'message' => 'Method tidak diizinkan untuk health.'
+            ]);
+        }
+
+        $totalRows = (int) $pdo->query('SELECT COUNT(*) FROM `branches`')->fetchColumn();
+        $dbName = $pdo->query('SELECT DATABASE()')->fetchColumn();
+
+        jsonResponse(200, [
+            'success' => true,
+            'message' => 'Diagnosa API cabang.',
+            'data' => [
+                'php_version'        => PHP_VERSION,
+                'database'           => $dbName,
+                'config_php_dipakai' => $databaseConfigUsed,
+                'branches_total'     => $totalRows,
+                'kolom_tabel'        => $availableColumns,
+                'kolom_terpetakan'   => $columnMap,
+                'blocklist_siap'     => $blocklistReady,
+                'auth_header_masuk'  => $authHeaderReceived,
+            ]
+        ]);
+    }
 
 
     if (strtolower((string) ($_GET['resource'] ?? '')) === 'blocklist') {
@@ -699,7 +829,9 @@ try {
 
         jsonResponse(200, [
             'success' => true,
-            'message' => 'Data cabang berhasil diambil.',
+            'message' => $total === 0
+                ? 'Tabel branches kosong di database ini.'
+                : 'Data cabang berhasil diambil.',
             'data' => $branches,
             'pagination' => [
                 'total' => $total,
@@ -781,7 +913,9 @@ try {
         $quotedFields = implode(
             ', ',
             array_map(
-                static fn(string $field): string => '`' . $columnMap[$field] . '`',
+                static function (string $field) use ($columnMap): string {
+                    return '`' . $columnMap[$field] . '`';
+                },
                 $fields
             )
         );
@@ -1019,16 +1153,16 @@ try {
 } catch (PDOException $e) {
     error_log('[REI API CABANG][SQL] ' . $e->getMessage());
 
-    jsonResponse(500, [
+    jsonResponse(500, array_merge([
         'success' => false,
         'message' => 'Operasi database gagal. Periksa field wajib dan struktur tabel.'
-    ]);
+    ], debugInfo($e)));
 
 } catch (Throwable $e) {
     error_log('[REI API CABANG][ERROR] ' . $e->getMessage());
 
-    jsonResponse(500, [
+    jsonResponse(500, array_merge([
         'success' => false,
         'message' => 'Terjadi kesalahan pada API cabang.'
-    ]);
+    ], debugInfo($e)));
 }
