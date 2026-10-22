@@ -1,18 +1,16 @@
 <?php
 declare(strict_types=1);
 
-/**
- * REI API Cabang - versi kompatibel production.
- *
- * Perubahan utama dibanding versi sebelumnya:
- *  - Kompatibel PHP 7.4+ (tanpa `never`, `mixed`, `array_is_list` bawaan).
- *  - config.php dicari di beberapa lokasi (hosting sering beda struktur folder).
- *  - Output liar dari config.php (echo/warning) dibuang supaya JSON tetap bersih.
- *  - Variabel koneksi diterima: $pdo / $db / $conn / $dbh (jika bertipe PDO).
- *  - Endpoint diagnosa: GET ?resource=health (butuh token).
- *  - Mode debug opsional: define('REI_API_DEBUG', true); di api-config.php
- *    (matikan lagi setelah masalah ketemu).
- */
+if (PHP_VERSION_ID < 80500) {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'success' => false,
+        'message' => 'Server harus memakai PHP 8.5 atau lebih baru. Versi saat ini: ' . PHP_VERSION . '. Ubah di Plesk: PHP Settings.',
+    ]);
+    exit;
+}
+
 
 @ini_set('display_errors', '0');
 error_reporting(E_ALL);
@@ -21,20 +19,7 @@ header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store');
 
-if (!function_exists('array_is_list')) {
-    function array_is_list(array $array): bool
-    {
-        $i = 0;
-        foreach ($array as $k => $_) {
-            if ($k !== $i++) {
-                return false;
-            }
-        }
-        return true;
-    }
-}
-
-function jsonResponse(int $status, array $data)
+function jsonResponse(int $status, array $data): never
 {
     http_response_code($status);
 
@@ -72,7 +57,7 @@ const BRANCH_COLUMN_ALIASES = [
     'map_embed_url' => ['map_embed_url', 'map_embed', 'embed_peta', 'embed_url'],
 ];
 
-function cleanText($v): string
+function cleanText(mixed $v): string
 {
     $s = trim((string) ($v ?? ''));
 
@@ -485,7 +470,7 @@ try {
 
         try {
             $currentDb = $pdo->query('SELECT DATABASE()')->fetchColumn();
-        } catch (Throwable $ignored) {
+        } catch (Throwable) {
         }
 
         jsonResponse(404, [
@@ -651,6 +636,7 @@ try {
             'message' => 'Diagnosa API cabang.',
             'data' => [
                 'php_version'        => PHP_VERSION,
+                'php_85_ok'          => PHP_VERSION_ID >= 80500,
                 'database'           => $dbName,
                 'config_php_dipakai' => $databaseConfigUsed,
                 'branches_total'     => $totalRows,
@@ -913,9 +899,7 @@ try {
         $quotedFields = implode(
             ', ',
             array_map(
-                static function (string $field) use ($columnMap): string {
-                    return '`' . $columnMap[$field] . '`';
-                },
+                static fn(string $field): string => '`' . $columnMap[$field] . '`',
                 $fields
             )
         );
