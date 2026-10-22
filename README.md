@@ -364,7 +364,7 @@ Periksa file konfigurasi database pada project, misalnya `config.php`.
 
 
 
-Sesuaikan host, nama database, username, dan password dengan konfigurasi MySQL lokal.
+Sesuaikan host, nama database, username, dan password dengan konfigurasi MySQL lokal. Pengaturan koneksi juga dapat diberikan melalui variabel lingkungan `REI_DB_HOST`, `REI_DB_NAME`, `REI_DB_USER`, dan `REI_DB_PASSWORD`; untuk Podman, gunakan nama host database yang dapat di-resolve pada jaringan container yang sama (misalnya `db`).
 
 
 
@@ -482,3 +482,20 @@ Untuk membuat cadangan:
 
 Jangan menjalankan `DROP DATABASE` atau menghapus tabel produksi tanpa backup dan konfirmasi yang jelas.
 
+
+
+\## 12. Halaman Website Publik
+
+
+
+Website publik menyediakan halaman Home, About Us, Service, Branch, Blog, dan Contact melalui navigasi utama. Navigasi atas memakai ikon dan berubah menjadi menu dropdown pada layar kecil; bottom bar tetap tersedia. Logo utama dapat diubah ukurannya melalui gaya navigasi. Tombol ID/EN menerjemahkan halaman, navigasi, label cabang, chatbot, dan enam artikel edukasi yang tersedia, serta mengingat pilihan bahasa pada browser. Nama lokasi dan alamat cabang tetap mengikuti sumber resmi. Hero Home memakai slider otomatis dari tiga ilustrasi promosi lokal di `uploads/hero/`; asetnya berasal dari gambar Raja Emas Indonesia yang disediakan untuk website. Artikel pada Blog dan detail artikel mengambil konten dari tabel `posts`, sedangkan daftar Branch menggunakan data dari tabel `branches`. Latar website menggunakan warna putih dengan pola titik sederhana; footer menampilkan alamat kantor melalui variabel lingkungan `REI_OFFICE_ADDRESS` dan copyright, serta berada di bagian bawah pada halaman yang kontennya pendek.
+
+
+
+URL halaman menggunakan parameter `page`, misalnya `/?page=about-us`, `/?page=service`, `/?page=cabang`, `/?page=blog`, dan `/?page=contact`.
+
+
+
+Enam artikel edukasi emas awal beserta ilustrasi SVG orisinalnya dapat ditambahkan secara idempoten ke database menggunakan `php sql/seed-blog-articles.php` dari root project. Daftar cabang yang tersedia dari halaman lokasi resmi dapat dimuat menggunakan `php sql/seed-branches.php`; seeder ini tidak mengubah cabang yang sudah ada. Data sumber tersimpan di `sql/branch-locations.json`, mencakup 118 entri bernomor yang berhasil diekstrak. Informasi alamat atau nomor telepon yang tidak dicantumkan sumber tetap kosong dan tidak direka. Pastikan konfigurasi database sudah benar sebelum menjalankan seeder.
+
+Chatbot mengambang membantu mengarahkan pengunjung ke halaman cabang, layanan, dan blog; jawabannya berbasis topik dan bukan layanan chat langsung.

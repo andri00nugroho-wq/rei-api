@@ -1,10 +1,10 @@
 <?php
 
-$host = 'localhost';
+$host = getenv('REI_DB_HOST') ?: 'localhost';
 $port = 3306;
-$dbname = 'dev';
-$user = 'admin_api';
-$pass = 'Majuterusrajaemas'; 
+$dbname = getenv('REI_DB_NAME') ?: 'dev';
+$user = getenv('REI_DB_USER') ?: 'admin_api';
+$pass = getenv('REI_DB_PASSWORD') ?: 'Majuterusrajaemas';
 
 try {
     $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
