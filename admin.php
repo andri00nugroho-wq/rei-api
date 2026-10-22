@@ -9,7 +9,6 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 }
 require 'config.php';
 
-// Otomatis buat tabel branches jika belum ada
 try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS `branches` (
       `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,7 +40,6 @@ if ($page === 'theme' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $msg_setting = "Tema berhasil diperbarui!";
 }
 
-// B. Proses Simpan Pengaturan Slider & Indikator
 if ($page === 'slider' && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_settings'])) {
     $indicator_show = isset($_POST['indicator_show']) ? 1 : 0;
     
@@ -338,6 +336,9 @@ foreach($chart_data as $cd) {
                 </a>
                 <a href="admin.php?page=theme" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= $page === 'theme' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
                     <span class="material-icons text-lg">palette</span> Tema
+                </a>
+                <a href="add-user.php" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl <?= basename($_SERVER['PHP_SELF'] ?? '') === 'add-user.php' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-200' : 'text-gray-600 hover:bg-gray-50' ?> transition">
+                    <span class="material-icons text-lg">person_add</span> Tambah User
                 </a>
                 <a href="index.php" target="_blank" class="flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-2xl text-gray-600 hover:bg-gray-50 transition">
                     <span class="material-icons text-lg">open_in_new</span> Website
