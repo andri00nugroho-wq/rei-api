@@ -10,8 +10,8 @@ const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 const DB_HOST = 'localhost';
 const DB_PORT = '3306';
 const DB_NAME = 'dev';
-const DB_USER = 'admin_dev';
-const DB_PASS = '';
+const DB_USER = 'admin_api';
+const DB_PASS = 'Majuterusrajaemas';
 
 const DB_TABLE = 'branches';
 
