@@ -1,28 +1,19 @@
-
 <?php
-// =========================================================
-// SIDEBAR REI CMS
-// =========================================================
-// Session dan autentikasi ditangani oleh halaman pemanggil.
 
 $currentScript = basename($_SERVER['PHP_SELF'] ?? '');
 
-// Ambil halaman dari controller admin.php
 $currentPage = $page ?? ($_GET['page'] ?? 'dashboard');
 
-// Halaman yang termasuk bagian Post
 $postScripts = [
     'add.php',
     'edit.php',
     'delete_post.php',
 ];
 
-// Jika halaman berdiri sendiri, tandai menu Post aktif
 if (in_array($currentScript, $postScripts, true)) {
     $currentPage = 'posts';
 }
 
-// Jika halaman sedang berada di bagian artikel
 $isPostSection = in_array(
     $currentPage,
     ['posts', 'categories'],
@@ -165,6 +156,16 @@ $subInactive = 'text-gray-600 hover:bg-gray-100 hover:text-gray-900';
         >
             <span class="material-icons text-lg">palette</span>
             <span>Tema</span>
+        </a>
+
+        <!-- TAMBAH USER -->
+        <a
+            href="add-user.php"
+            class="<?= $navBase ?> <?= $currentScript === 'add-user.php' ? $navActive : $navInactive ?>"
+            <?= $currentScript === 'add-user.php' ? 'aria-current="page"' : '' ?>
+        >
+            <span class="material-icons text-lg">person_add</span>
+            <span>Tambah User</span>
         </a>
 
         <!-- WEBSITE -->
