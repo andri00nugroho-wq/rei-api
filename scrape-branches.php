@@ -9,7 +9,7 @@ const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 // PENTING: harus database yang sama dengan yang dibaca halaman admin/CMS.
 const DB_HOST = '127.0.0.1';
 const DB_PORT = '3306';
-const DB_NAME = 'rei_cms_v1';
+const DB_NAME = 'dev';
 const DB_USER = 'admin_cms';
 const DB_PASS = 'M@juterusrajaemas';
 
