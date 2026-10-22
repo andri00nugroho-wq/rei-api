@@ -7,11 +7,11 @@ const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 
 // Sesuaikan dengan konfigurasi database Laragon Anda.
 // PENTING: harus database yang sama dengan yang dibaca halaman admin/CMS.
-const DB_HOST = 'db.fr-roub1.bengt.wasmernet.com';
-const DB_PORT = '20184';
-const DB_NAME = 'db_58299260';
-const DB_USER = 'user_e12f6fbb';
-const DB_PASS = 'pw_Sfke8UNhHXh0QyKLzT9OVZWi5545M2kv';
+const DB_HOST = '127.0.0.1';
+const DB_PORT = '3306';
+const DB_NAME = 'rei_cms_v1';
+const DB_USER = 'admin_cms';
+const DB_PASS = 'M@juterusrajaemas';
 
 const DB_TABLE = 'branches';
 
