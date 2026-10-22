@@ -3,8 +3,8 @@
 $host = 'localhost';
 $port = 3306;
 $dbname = 'dev';
-$user = 'admin_dev';
-$pass = ''; 
+$user = 'admin_api';
+$pass = 'Majuterusrajaemas'; 
 
 try {
     $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
