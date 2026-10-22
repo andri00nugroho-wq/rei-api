@@ -1,19 +1,6 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Scraper cabang Raja Emas Indonesia -> database MySQL.
- *
- * Perubahan untuk production (Plesk):
- *  - Password database TIDAK lagi ditulis di file ini.
- *    Koneksi diambil dari config.php (sama dengan yang dipakai admin.php dan API).
- *    Cadangan: file db-local.php (return array) atau environment REI_DB_*.
- *  - Host default "localhost" (user database Plesk biasanya hanya boleh dari localhost),
- *    lalu otomatis mencoba 127.0.0.1.
- *  - Tabel hanya dibuat jika belum ada, dan kegagalan CREATE (hak akses) tidak
- *    menghentikan proses jika tabel sudah tersedia.
- *  - Kompatibel PHP 7.4+ (str_contains / str_starts_with diberi pengganti).
- */
 
 if (!function_exists('str_contains')) {
     function str_contains(string $haystack, string $needle): bool
