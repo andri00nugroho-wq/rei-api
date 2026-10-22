@@ -24,7 +24,7 @@ if (PHP_VERSION_ID < 80500) {
  *  - Password database TIDAK lagi ditulis di file ini.
  *    Koneksi diambil dari config.php (sama dengan yang dipakai admin.php dan API).
  *    Cadangan: file db-local.php (return array) atau environment REI_DB_*.
- *  - Host default "localhost" (user database Plesk biasanya hanya boleh dari localhost),
+ *  - Host default "127.0.0.1" (user database Plesk biasanya hanya boleh dari 127.0.0.1),
  *    lalu otomatis mencoba 127.0.0.1.
  *  - Tabel hanya dibuat jika belum ada, dan kegagalan CREATE (hak akses) tidak
  *    menghentikan proses jika tabel sudah tersedia.
@@ -137,7 +137,7 @@ function connectDatabase(): PDO
         }
     }
 
-    $host = (string) ($local['host'] ?? (getenv('REI_DB_HOST') ?: 'localhost'));
+    $host = (string) ($local['host'] ?? (getenv('REI_DB_HOST') ?: '127.0.0.1'));
     $port = (string) ($local['port'] ?? (getenv('REI_DB_PORT') ?: '3306'));
     $name = (string) ($local['name'] ?? (getenv('REI_DB_NAME') ?: ''));
     $user = (string) ($local['user'] ?? (getenv('REI_DB_USER') ?: ''));
@@ -152,7 +152,7 @@ function connectDatabase(): PDO
 
     $hosts = [$host];
 
-    if ($host === 'localhost') {
+    if ($host === '127.0.0.1') {
         $hosts[] = '127.0.0.1';
     }
 
