@@ -1,20 +1,36 @@
 <?php
 declare(strict_types=1);
 
+if (PHP_VERSION_ID < 80500) {
+    $msg = 'Scraper ini membutuhkan PHP 8.5 atau lebih baru. Versi saat ini: ' . PHP_VERSION . '.';
 
-if (!function_exists('str_contains')) {
-    function str_contains(string $haystack, string $needle): bool
-    {
-        return $needle === '' || strpos($haystack, $needle) !== false;
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, $msg . "\n");
+    } else {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $msg;
     }
+
+    exit(1);
 }
 
-if (!function_exists('str_starts_with')) {
-    function str_starts_with(string $haystack, string $needle): bool
-    {
-        return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
-    }
-}
+/**
+ * Scraper cabang Raja Emas Indonesia -> database MySQL.
+ *
+ * Versi PHP 8.5 (production / Plesk).
+ *
+ * Perubahan untuk production (Plesk):
+ *  - Password database TIDAK lagi ditulis di file ini.
+ *    Koneksi diambil dari config.php (sama dengan yang dipakai admin.php dan API).
+ *    Cadangan: file db-local.php (return array) atau environment REI_DB_*.
+ *  - Host default "localhost" (user database Plesk biasanya hanya boleh dari localhost),
+ *    lalu otomatis mencoba 127.0.0.1.
+ *  - Tabel hanya dibuat jika belum ada, dan kegagalan CREATE (hak akses) tidak
+ *    menghentikan proses jika tabel sudah tersedia.
+ *  - Ditulis untuk PHP 8.5+: arrow function, array_last(),
+ *    str_contains/str_starts_with bawaan. Tidak memakai curl_close() (deprecated di 8.5).
+ */
 
 const SOURCE_URL = 'https://rajaemasindonesia.co.id/#lokasi';
 const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
@@ -68,7 +84,7 @@ const DIRECTION_LABEL_REGEX =
  */
 function loadConfigPdo(string $path): ?PDO
 {
-    $loader = static function (string $file) {
+    $loader = static function (string $file): ?PDO {
         require $file;
 
         return (isset($pdo) && $pdo instanceof PDO) ? $pdo : null;
@@ -731,7 +747,7 @@ function parseSegment(array $marker, array $slice): array
 
     foreach ($slice as $token) {
         if ($token['type'] === 'line') {
-            if ($lines === [] || end($lines) !== $token['text']) {
+            if ($lines === [] || array_last($lines) !== $token['text']) {
                 $lines[] = $token['text'];
             }
         } elseif ($token['type'] === 'link') {
@@ -1000,9 +1016,7 @@ function parseBranches(string $html, callable $log): array
 
     uasort(
         $branches,
-        static function (array $a, array $b): int {
-            return (int) $a['branch_number'] <=> (int) $b['branch_number'];
-        }
+        static fn(array $a, array $b): int => (int) $a['branch_number'] <=> (int) $b['branch_number']
     );
 
     return array_values($branches);
@@ -1015,9 +1029,7 @@ function diagnoseBranches(array $branches, callable $log): void
     }
 
     $numbers = array_map(
-        static function (array $b): int {
-            return (int) $b['branch_number'];
-        },
+        static fn(array $b): int => (int) $b['branch_number'],
         $branches
     );
 
@@ -1026,9 +1038,7 @@ function diagnoseBranches(array $branches, callable $log): void
 
     $last = array_slice($branches, -3);
     $labels = array_map(
-        static function (array $b): string {
-            return $b['branch_number'] . ' ' . $b['title'];
-        },
+        static fn(array $b): string => $b['branch_number'] . ' ' . $b['title'],
         $last
     );
     $log('3 cabang terakhir terbaca: ' . implode(' | ', $labels));
@@ -1228,9 +1238,7 @@ function syncBranch(PDO $pdo, array $branch): string
     }
 
     $placeholders = array_map(
-        static function (string $column): string {
-            return ':' . $column;
-        },
+        static fn(string $column): string => ':' . $column,
         $columns
     );
 
@@ -1512,7 +1520,9 @@ function isDirectExecution(): bool
 
 if (isDirectExecution()) {
     if (PHP_SAPI !== 'cli') {
-    
+        // Akses langsung lewat browser hanya diizinkan dari komputer lokal,
+        // karena proses ini bisa menghapus data. Di server publik, panggil
+        // runSync() dari admin.php setelah cek login + CSRF.
         $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
 
         if (!in_array($remote, ['127.0.0.1', '::1'], true)) {
