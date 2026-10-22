@@ -7,7 +7,7 @@ const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 
 // Sesuaikan dengan konfigurasi database Laragon Anda.
 // PENTING: harus database yang sama dengan yang dibaca halaman admin/CMS.
-const DB_HOST = '127.0.0.1';
+const DB_HOST = 'localhost';
 const DB_PORT = '3306';
 const DB_NAME = 'dev';
 const DB_USER = 'admin_dev';
