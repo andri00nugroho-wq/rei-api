@@ -4,7 +4,7 @@ $host = '127.0.0.1';
 $port = 3306;
 $dbname = 'dev';
 $user = 'admin_dev';
-$pass = 'M@juterusrajaemas'; 
+$pass = ''; 
 
 try {
     $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
