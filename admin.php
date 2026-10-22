@@ -235,11 +235,11 @@ try {
 } catch (PDOException $e) { $branches_list = []; }
 
 try {
-    $theme = $pdo->query("SELECT * FROM theme_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $theme = $pdo->query("SELECT * FROM theme_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
 } catch (PDOException $e) { $theme = []; }
 
 try {
-    $s_set = $pdo->query("SELECT * FROM slider_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $s_set = $pdo->query("SELECT * FROM slider_settings WHERE id = 1")->fetch(PDO::FETCH_ASSOC);
 } catch (PDOException $e) { $s_set = []; }
 
 try {
@@ -262,8 +262,8 @@ try {
 $chart_labels = [];
 $chart_values = [];
 foreach($chart_data as $cd) {
-    $chart_labels[] = date('d M', strtotime((string)($cd['visit_date'] ?? 'now')));
-    $chart_values[] = (int)($cd['views'] ?? 0);
+    $chart_labels[] = date('d M', strtotime($cd['visit_date']));
+    $chart_values[] = $cd['views'];
 }
 ?>
 <!DOCTYPE html>
@@ -559,22 +559,22 @@ foreach($chart_data as $cd) {
                                         <div>
                                             <div class="flex justify-between items-start mb-3">
                                                 <div>
-                                                    <span class="text-2xl font-bold text-gray-900"><?= htmlspecialchars((string)($b['branch_number'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-                                                    <h4 class="text-xl font-bold text-gray-900 mt-1 leading-snug"><?= htmlspecialchars((string)($b['title'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></h4>
+                                                    <span class="text-2xl font-bold text-gray-900"><?= htmlspecialchars($b['branch_number'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+                                                    <h4 class="text-xl font-bold text-gray-900 mt-1 leading-snug"><?= htmlspecialchars($b['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></h4>
                                                 </div>
                                                 <div class="flex items-center gap-1">
                                                     <a href="admin.php?page=branches&edit_branch=<?= $b['id'] ?>" class="text-amber-600 hover:text-amber-800 bg-amber-50 p-2 rounded-xl" title="Edit"><span class="material-icons text-sm">edit</span></a>
                                                     <a href="admin.php?page=branches&delete_branch=<?= $b['id'] ?>" onclick="return confirm('Hapus cabang ini?')" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-xl" title="Hapus"><span class="material-icons text-sm">delete</span></a>
                                                 </div>
                                             </div>
-                                            <p class="text-sm text-gray-700 mb-4"><?= nl2br(htmlspecialchars((string)($b['address'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?></p>
-                                            <p class="text-sm font-semibold text-[#3b1c32] mb-3 underline">Hp & Whatsapp: <?= htmlspecialchars((string)($b['phone'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
-                                            <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars((string)($b['hours'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
-                                            <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars((string)($b['notes'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
+                                            <p class="text-sm text-gray-700 mb-4"><?= nl2br(htmlspecialchars($b['address'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?></p>
+                                            <p class="text-sm font-semibold text-[#3b1c32] mb-3 underline">Hp & Whatsapp: <?= htmlspecialchars($b['phone'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
+                                            <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars($b['hours'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
+                                            <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars($b['notes'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
 
                                            
                                         </div>
-                                        <a href="<?= !empty($b['map_link']) ? htmlspecialchars((string)$b['map_link'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
+                                        <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
                                             Menuju Lokasi <span class="material-icons text-sm">north_east</span>
                                         </a>
                                     </div>
