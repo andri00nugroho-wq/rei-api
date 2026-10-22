@@ -353,7 +353,7 @@ foreach($chart_data as $cd) {
 
         <div class="flex flex-col flex-1 h-full bg-white rounded-3xl shadow-xl border border-gray-100/80 overflow-hidden">
             <header class="flex items-center justify-between h-20 px-8 bg-white border-b border-gray-100 z-10 shrink-0">
-                <h1 class="text-xl font-bold text-gray-800 capitalize">Panel: <?= htmlspecialchars($page) ?></h1>
+                <h1 class="text-xl font-bold text-gray-800 capitalize">Panel: <?= htmlspecialchars($page, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></h1>
                 <?php if($page === 'posts'): ?>
                     <a href="add.php" class="inline-flex items-center gap-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium px-4 py-2.5 rounded-xl shadow-md shadow-cyan-100 transition">
                         <span class="material-icons text-sm">add</span> Artikel Baru
@@ -449,8 +449,8 @@ foreach($chart_data as $cd) {
                     </script>
 
                 <?php elseif ($page === 'branches'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
-                    <?php if($sync_error): ?><div class='mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium'><strong>Sinkronisasi gagal:</strong> <?= htmlspecialchars($sync_error) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
+                    <?php if($sync_error): ?><div class='mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium'><strong>Sinkronisasi gagal:</strong> <?= htmlspecialchars($sync_error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="mb-6 bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                         <div>
                             <h3 class="font-semibold text-gray-800 flex items-center gap-2"><span class="material-icons text-cyan-600">sync</span> Sinkronisasi Data Cabang</h3>
@@ -483,35 +483,35 @@ foreach($chart_data as $cd) {
 
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">No. Cabang (Contoh: 01, 02)</label>
-                                    <input type="text" name="branch_number" required value="<?= htmlspecialchars($edit_branch_data['branch_number'] ?? '') ?>" placeholder="01" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="branch_number" required value="<?= htmlspecialchars($edit_branch_data['branch_number'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="01" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Nama Cabang / Judul</label>
-                                    <input type="text" name="title" required value="<?= htmlspecialchars($edit_branch_data['title'] ?? '') ?>" placeholder="Jakarta Utara - Batavia PIK" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="title" required value="<?= htmlspecialchars($edit_branch_data['title'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="Jakarta Utara - Batavia PIK" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Alamat Lengkap</label>
-                                    <textarea name="address" required rows="2" placeholder="Rukan Golf Island..." class="w-full mt-1 p-2.5 border rounded-xl text-sm"><?= htmlspecialchars($edit_branch_data['address'] ?? '') ?></textarea>
+                                    <textarea name="address" required rows="2" placeholder="Rukan Golf Island..." class="w-full mt-1 p-2.5 border rounded-xl text-sm"><?= htmlspecialchars($edit_branch_data['address'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></textarea>
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">No. HP / WhatsApp</label>
-                                    <input type="text" name="phone" required value="<?= htmlspecialchars($edit_branch_data['phone'] ?? '') ?>" placeholder="0822-9999-5125" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="phone" required value="<?= htmlspecialchars($edit_branch_data['phone'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="0822-9999-5125" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Jam Operasional</label>
-                                    <input type="text" name="hours" required value="<?= htmlspecialchars($edit_branch_data['hours'] ?? '') ?>" placeholder="Pukul 10.00 - 21.00 WIB" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="hours" required value="<?= htmlspecialchars($edit_branch_data['hours'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="Pukul 10.00 - 21.00 WIB" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Catatan Khusus</label>
-                                    <input type="text" name="notes" value="<?= htmlspecialchars($edit_branch_data['notes'] ?? '') ?>" placeholder="BUKA SETIAP HARI" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="notes" value="<?= htmlspecialchars($edit_branch_data['notes'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="BUKA SETIAP HARI" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
                                 <!-- <div>
                                     <label class="text-xs font-medium text-gray-500">Link URL Embed Google Maps (src iframe saja)</label>
-                                    <textarea name="map_embed_url" rows="2" placeholder="https://www.google.com/maps/embed?pb=..." class="w-full mt-1 p-2.5 border rounded-xl text-xs font-mono"><?= htmlspecialchars($edit_branch_data['map_embed_url'] ?? '') ?></textarea>
+                                    <textarea name="map_embed_url" rows="2" placeholder="https://www.google.com/maps/embed?pb=..." class="w-full mt-1 p-2.5 border rounded-xl text-xs font-mono"><?= htmlspecialchars($edit_branch_data['map_embed_url'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></textarea>
                                 </div> -->
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Link Tombol "Menuju Lokasi"</label>
-                                    <input type="text" name="map_link" value="<?= htmlspecialchars($edit_branch_data['map_link'] ?? '') ?>" placeholder="https://maps.google.com/?q=..." class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    <input type="text" name="map_link" value="<?= htmlspecialchars($edit_branch_data['map_link'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="https://maps.google.com/?q=..." class="w-full mt-1 p-2.5 border rounded-xl text-sm">
                                 </div>
 
                                 <div class="flex gap-2">
@@ -559,22 +559,22 @@ foreach($chart_data as $cd) {
                                         <div>
                                             <div class="flex justify-between items-start mb-3">
                                                 <div>
-                                                    <span class="text-2xl font-bold text-gray-900"><?= htmlspecialchars($b['branch_number']) ?></span>
-                                                    <h4 class="text-xl font-bold text-gray-900 mt-1 leading-snug"><?= htmlspecialchars($b['title']) ?></h4>
+                                                    <span class="text-2xl font-bold text-gray-900"><?= htmlspecialchars($b['branch_number'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+                                                    <h4 class="text-xl font-bold text-gray-900 mt-1 leading-snug"><?= htmlspecialchars($b['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></h4>
                                                 </div>
                                                 <div class="flex items-center gap-1">
                                                     <a href="admin.php?page=branches&edit_branch=<?= $b['id'] ?>" class="text-amber-600 hover:text-amber-800 bg-amber-50 p-2 rounded-xl" title="Edit"><span class="material-icons text-sm">edit</span></a>
                                                     <a href="admin.php?page=branches&delete_branch=<?= $b['id'] ?>" onclick="return confirm('Hapus cabang ini?')" class="text-red-500 hover:text-red-700 bg-red-50 p-2 rounded-xl" title="Hapus"><span class="material-icons text-sm">delete</span></a>
                                                 </div>
                                             </div>
-                                            <p class="text-sm text-gray-700 mb-4"><?= nl2br(htmlspecialchars($b['address'])) ?></p>
-                                            <p class="text-sm font-semibold text-[#3b1c32] mb-3 underline">Hp & Whatsapp: <?= htmlspecialchars($b['phone']) ?></p>
-                                            <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars($b['hours']) ?></p>
-                                            <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars($b['notes']) ?></p>
+                                            <p class="text-sm text-gray-700 mb-4"><?= nl2br(htmlspecialchars($b['address'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')) ?></p>
+                                            <p class="text-sm font-semibold text-[#3b1c32] mb-3 underline">Hp & Whatsapp: <?= htmlspecialchars($b['phone'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
+                                            <p class="text-sm text-gray-800">Buka : <?= htmlspecialchars($b['hours'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
+                                            <p class="text-sm text-gray-800 mb-4">Catatan: <?= htmlspecialchars($b['notes'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p>
 
                                            
                                         </div>
-                                        <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link']) : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
+                                        <a href="<?= !empty($b['map_link']) ? htmlspecialchars($b['map_link'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : '#' ?>" target="_blank" class="w-full py-3 bg-[#3b1c32] text-white rounded-2xl text-center text-sm font-medium flex items-center justify-center gap-2 hover:opacity-95 transition shadow-md">
                                             Menuju Lokasi <span class="material-icons text-sm">north_east</span>
                                         </a>
                                     </div>
@@ -594,7 +594,7 @@ foreach($chart_data as $cd) {
                                     <?php foreach ($posts as$post): ?>
                                     <tr class="hover:bg-gray-50 transition">
                                         <td class="py-4 px-6 text-gray-500">#<?= $post['id'] ?></td>
-                                        <td class="py-4 px-6 font-medium text-gray-900"><?= htmlspecialchars($post['title']) ?><?php if(!empty($post['category_name'])): ?><span class="block text-[11px] font-normal text-cyan-600 mt-0.5">Kategori: <?= htmlspecialchars($post['category_name']) ?></span><?php endif; ?></td>
+                                        <td class="py-4 px-6 font-medium text-gray-900"><?= htmlspecialchars($post['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?><?php if(!empty($post['category_name'])): ?><span class="block text-[11px] font-normal text-cyan-600 mt-0.5">Kategori: <?= htmlspecialchars($post['category_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span><?php endif; ?></td>
                                         <td class="py-4 px-6 text-gray-500"><?= date('d M Y, H:i', strtotime($post['created_at'])) ?></td>
                                         <td class="py-4 px-6 text-center space-x-2">
                                             <a href="edit.php?id=<?= $post['id'] ?>" class="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 inline-block"><span class="material-icons text-sm">edit</span></a>
@@ -608,7 +608,7 @@ foreach($chart_data as $cd) {
                     </div>
 
                 <?php elseif ($page === 'categories'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                             <h3 class="font-semibold text-gray-800 mb-4">Tambah Kategori Baru</h3>
@@ -624,7 +624,7 @@ foreach($chart_data as $cd) {
                                 <tbody class="divide-y divide-gray-100 text-sm">
                                     <?php foreach($categories_list as$cat): ?>
                                     <tr class="hover:bg-gray-50 transition">
-                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($cat['name']) ?></td>
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($cat['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
                                         <td class="py-3 px-4 text-cyan-600 text-xs font-mono"><?= $cat['slug'] ?></td>
                                         <td class="py-3 px-4 text-center"><a href="admin.php?page=categories&delete_cat=<?= $cat['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium" onclick="return confirm('Hapus?')">Hapus</a></td>
                                     </tr>
@@ -635,7 +635,7 @@ foreach($chart_data as $cd) {
                     </div>
 
                 <?php elseif ($page === 'pages'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                             <h3 class="font-semibold text-gray-800 mb-4">Buat Halaman</h3>
@@ -656,7 +656,7 @@ foreach($chart_data as $cd) {
                                 <tbody class="divide-y divide-gray-100 text-sm">
                                     <?php foreach($pages_list as$p): ?>
                                     <tr class="hover:bg-gray-50 transition">
-                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title']) ?></td>
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
                                         <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= $p['slug'] ?></td>
                                         <td class="py-3 px-4 text-center space-x-2">
                                             <a href="http://localhost/rei/" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
@@ -677,14 +677,14 @@ foreach($chart_data as $cd) {
                     </div>
 
                 <?php elseif ($page === 'menus'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                             <h3 class="font-semibold text-gray-800 mb-4">Tambah Menu</h3>
                             <form method="POST" class="space-y-4">
                                 <div><label class="text-xs font-medium text-gray-500">Nama Menu</label><input type="text" name="title" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
                                 <div><label class="text-xs font-medium text-gray-500">URL</label><input type="text" name="url" value="#" required class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
-                                <div><label class="text-xs font-medium text-gray-500">Parent</label><select name="parent_id" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white"><option value="0">-- Utama --</option><?php foreach($parent_menus as$pm): ?><option value="<?= $pm['id'] ?>"><?= htmlspecialchars($pm['title']) ?></option><?php endforeach; ?></select></div>
+                                <div><label class="text-xs font-medium text-gray-500">Parent</label><select name="parent_id" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white"><option value="0">-- Utama --</option><?php foreach($parent_menus as$pm): ?><option value="<?= $pm['id'] ?>"><?= htmlspecialchars($pm['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></option><?php endforeach; ?></select></div>
                                 <div><label class="text-xs font-medium text-gray-500">Urutan</label><input type="number" name="sort_order" value="0" class="w-full mt-1 p-2.5 border rounded-xl text-sm"></div>
                                 <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Simpan</button>
                             </form>
@@ -696,8 +696,8 @@ foreach($chart_data as $cd) {
                                 <tbody class="divide-y divide-gray-100 text-sm">
                                     <?php foreach($all_menus as$m): ?>
                                     <tr class="hover:bg-gray-50 transition">
-                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($m['title']) ?></td>
-                                        <td class="py-3 px-4 text-gray-500 text-xs"><?= htmlspecialchars($m['url']) ?></td>
+                                        <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($m['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
+                                        <td class="py-3 px-4 text-gray-500 text-xs"><?= htmlspecialchars($m['url'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
                                         <td class="py-3 px-4 text-center"><a href="admin.php?page=menus&delete_menu=<?= $m['id'] ?>" class="text-red-500 hover:text-red-700 text-xs font-medium" onclick="return confirm('Hapus?')">Hapus</a></td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -707,7 +707,7 @@ foreach($chart_data as $cd) {
                     </div>
 
                 <?php elseif ($page === 'slider'): ?>
-                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg) ?></div><?php endif; ?>
+                    <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                             <h3 class="font-semibold text-gray-800 mb-4">Pengaturan Slider</h3>
@@ -733,7 +733,7 @@ foreach($chart_data as $cd) {
                     </div>
 
                 <?php elseif ($page === 'theme'): ?>
-                    <?php if($msg_setting): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg_setting) ?></div><?php endif; ?>
+                    <?php if($msg_setting): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-600 rounded-xl text-sm'><?= htmlspecialchars($msg_setting, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm max-w-xl">
                         <h3 class="font-semibold text-gray-800 mb-4">Tema Glassmorphism</h3>
                         <form method="POST" class="space-y-4">
