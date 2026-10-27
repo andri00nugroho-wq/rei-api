@@ -12,15 +12,24 @@ $visitor_count = $pdo->query("SELECT total_views FROM visitor_stats WHERE id = 1
 $today = date('Y-m-d');
 $pdo->query("INSERT INTO daily_visitors (visit_date, views) VALUES ('$today', 1) ON DUPLICATE KEY UPDATE views = views + 1");
 
+require_once __DIR__ . '/site-pages.php';
+
 $requested_page = $_GET['page'] ?? 'home';
-$site_pages = [
-    'home' => 'Home',
-    'about-us' => 'Tentang Kami',
-    'service' => 'Layanan',
-    'cabang' => 'Cabang',
-    'blog' => 'Blog',
-    'contact' => 'Kontak',
-];
+// Slug lama (misalnya "beranda" atau "branch") diarahkan ke halaman bawaannya.
+$requested_page = rei_site_page_key($requested_page) ?? $requested_page;
+
+// Halaman bawaan website yang isinya diatur dari menu Page di dashboard.
+$site_page_rows = rei_load_site_pages($pdo);
+$site_pages = [];
+foreach ($site_page_rows as $site_key => $site_row) {
+    $site_pages[$site_key] = rei_site_page_title($site_key, $site_row);
+}
+$site_page_data = $site_page_rows[$requested_page] ?? null;
+$site_page_intro = isset($site_pages[$requested_page]) ? rei_site_page_intro($requested_page, $site_page_data) : '';
+$site_page_custom_html = trim((string) ($site_page_data['custom_html'] ?? ''));
+$site_page_banner = !empty($site_page_data['featured_image'])
+    ? '<figure class="page-banner"><img src="' . htmlspecialchars((string) $site_page_data['featured_image'], ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_pages[$requested_page] ?? '', ENT_QUOTES, 'UTF-8') . '"></figure>'
+    : '';
 $current_page_data = null;
 
 if ($requested_page && !isset($site_pages[$requested_page]) && $requested_page !== 'admin') {
@@ -104,7 +113,27 @@ $render_branch_card = static function (array $branch) use ($escape): void {
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <script>
+        // Deteksi jenis perangkat: menandai <html data-device="mobile|tablet|laptop|desktop" data-input="touch|mouse">
+        // supaya tata letak menyesuaikan HP, tablet, laptop, dan desktop.
+        (function () {
+            var root = document.documentElement;
+            function detect() {
+                var width = window.innerWidth;
+                var touch = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+                var device = width < 640 ? 'mobile'
+                    : width < 1024 ? 'tablet'
+                    : (touch && width < 1366) ? 'tablet'
+                    : width < 1440 ? 'laptop' : 'desktop';
+                root.dataset.device = device;
+                root.dataset.input = touch ? 'touch' : 'mouse';
+            }
+            detect();
+            window.addEventListener('resize', detect, { passive: true });
+            window.addEventListener('orientationchange', detect);
+        })();
+    </script>
     <title><?= $escape($current_page_data['title'] ?? $site_pages[$requested_page ?? 'home'] ?? 'Raja Emas Indonesia') ?> - Raja Emas Indonesia</title>
     
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -334,6 +363,8 @@ $render_branch_card = static function (array $branch) use ($escape): void {
         .feature-card h3, .service-card h3, .value-card h3, .post-card h3, .branch-card h3 { margin: 14px 0 9px; font-size: 1.13rem; font-weight: 700; }
         .feature-card p, .service-card p, .value-card p, .content-panel p, .post-card p { color: #625b50; line-height: 1.75; margin-bottom: 0; }
         .page-heading { max-width: 800px; margin-bottom: 32px; }
+        .page-banner { margin: 0 0 34px; overflow: hidden; border-radius: 24px; }
+        .page-banner img { display: block; width: 100%; max-height: 460px; object-fit: cover; }
         .page-heading h1 { font-size: clamp(2.6rem, 5vw, 4.6rem); }
         .content-panel { margin-bottom: 20px; }
         .content-panel p + p { margin-top: 14px; }
@@ -795,6 +826,137 @@ $render_branch_card = static function (array $branch) use ($escape): void {
             .feature-card, .service-card, .value-card, .post-card, .branch-card { transition: none; }
         }
 
+        /* ===== Lapisan responsif =====
+           Kelas perangkat diatur oleh skrip di <head> lewat html[data-device]:
+           mobile (<640px), tablet (640-1023px atau layar sentuh <1366px), laptop (1024-1439px), desktop (>=1440px).
+           Ukuran teks dan jarak ikut lebar layar agar tidak terlalu besar atau kecil di perangkat mana pun. */
+        :root {
+            --nav-top: 20px;
+            --nav-h: 78px;
+            --shell-top: calc(var(--nav-top) + var(--nav-h) + 22px);
+            --hero-bars: 200px;
+        }
+        html { font-size: clamp(15px, 14px + .2vw, 17px); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+        body { overflow-x: hidden; }
+        img, video, iframe { max-width: 100%; }
+
+        /* Jarak konten dari navbar mengikuti tinggi navbar, bukan angka tetap. */
+        .site-nav { min-height: var(--nav-h) !important; }
+        .page-shell { padding-top: var(--shell-top); }
+        .content-container, .slider-wrapper { margin-top: var(--shell-top); }
+        .page-custom-content { margin-top: var(--shell-top); }
+        .hero-slider { margin-top: 0; }
+
+        /* Banner: rasio asli 2:1, tidak ditarik, dan selalu muat di tinggi layar. */
+        .hero-slide img,
+        .hero-slide img[loading] { height: auto !important; aspect-ratio: 2 / 1 !important; object-fit: cover !important; }
+        .hero-slider { width: 100%; max-width: min(1680px, max(560px, calc((100svh - var(--shell-top) - var(--hero-bars) - 16px) * 2))); margin-left: auto; margin-right: auto; }
+        .hero-slide-caption { flex-wrap: wrap; }
+        .hero-slide-caption > div { flex: 1 1 260px; min-width: 0; }
+        .hero-slide-caption .button { flex: 0 0 auto; white-space: nowrap; }
+
+        /* Judul dan paragraf menyesuaikan lebar layar. */
+        .hero-intro h1 { font-size: clamp(2.2rem, 1.2rem + 3.6vw, 4.6rem); }
+        .hero h1, .page-heading h1 { font-size: clamp(2.1rem, 1.1rem + 3.4vw, 4.4rem); }
+        .section-heading h2 { font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.4rem); }
+        .hero-intro-copy > p, .page-heading > p { font-size: clamp(.98rem, .92rem + .25vw, 1.1rem); }
+        .section { margin-top: clamp(40px, 3vw + 24px, 72px); }
+        .hero-intro { gap: clamp(24px, 4vw, 56px); padding: clamp(28px, 4vw, 52px) clamp(4px, 2vw, 24px) 24px; }
+        .page-heading { padding: clamp(26px, 4.5vw, 64px); }
+        .page-banner img { max-height: min(460px, 55svh); }
+        .content-panel h2 { margin: .25em 0 .5em; line-height: 1.15; }
+        .hero-intro { margin-bottom: clamp(8px, 2vw, 34px); }
+
+        /* Navbar atas disembunyikan dan menu bawah dimunculkan saat halaman di-scroll ke bawah. */
+        #top-nav, .chatbot-launcher { transition: top .4s ease-in-out, bottom .3s ease; }
+        body.nav-scrolled #bottom-nav { bottom: 30px; }
+        @media (min-width: 601px) {
+            body.nav-scrolled #top-nav { top: -140px !important; }
+        }
+
+        /* Kartu yang tersisa sendirian di baris terakhir (grid 2 kolom) dibuat selebar baris. */
+        @media (min-width: 601px) and (max-width: 900px) {
+            .service-grid > :last-child:nth-child(odd),
+            .feature-grid > :last-child:nth-child(odd),
+            .value-grid > :last-child:nth-child(odd),
+            .post-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+        }
+
+        /* Laptop & desktop (mouse): menu tampil penuh, tanpa tombol menu. */
+        @media (min-width: 1100px) {
+            html:not([data-device="tablet"]) .mobile-menu-toggle { display: none !important; }
+            html:not([data-device="tablet"]) .site-nav { justify-content: space-between !important; flex-wrap: nowrap; gap: clamp(10px, 1.4vw, 22px); }
+            html:not([data-device="tablet"]) .site-nav .site-logo { width: clamp(160px, 12vw, 220px); }
+            html:not([data-device="tablet"]) .site-nav .nav-links-container {
+                position: static; display: flex; flex: 1 1 auto; flex-direction: row; justify-content: center; align-items: center;
+                width: auto; min-width: 0; gap: clamp(2px, .4vw, 8px); padding: 0; overflow: visible;
+                border: 0; border-radius: 0; background: none; box-shadow: none;
+                opacity: 1; visibility: visible; pointer-events: auto; transform: none;
+            }
+            html:not([data-device="tablet"]) .site-nav .nav-links-container .nav-link {
+                min-height: 44px; padding: 8px clamp(8px, .8vw, 14px); font-size: clamp(14px, .55vw + 8px, 16px);
+            }
+            html:not([data-device="tablet"]) .language-switch { margin-left: 0; }
+        }
+
+        /* Desktop lebar: konten tidak melebar berlebihan. */
+        @media (min-width: 1920px) {
+            :root { --site-max-width: 1760px; }
+        }
+
+        /* Tablet */
+        @media (max-width: 1023px) {
+            :root { --nav-top: 16px; --nav-h: 72px; --hero-bars: 168px; }
+            .hero-slide-caption { min-height: 92px; padding: 16px 22px; }
+            .hero-slider-controls-bar { min-height: 60px; }
+        }
+
+        /* Mobile */
+        @media (max-width: 600px) {
+            :root { --nav-top: 10px; --nav-h: 64px; --site-gutter: 24px; }
+            .page-shell { padding-top: calc(var(--shell-top) - 8px); }
+            .site-nav { min-height: 64px !important; }
+            .hero-slider { max-width: 100%; }
+            .hero-slide-caption { min-height: 0; padding: 14px 16px; gap: 10px; }
+            .hero-slide-caption h2 { font-size: 1.02rem; }
+            .hero-slider-controls-bar { min-height: 48px; padding-top: 10px; padding-bottom: 10px; }
+            .hero-slider-controls-bar > .eyebrow { font-size: .62rem; letter-spacing: .14em; }
+            .hero-intro { padding: 30px 2px 16px; }
+            .hero-intro-actions .button { flex: 1 1 auto; justify-content: center; }
+            .hero-benefit-card { min-height: 0; padding: 15px; }
+            .hero-benefit-card .material-icons { margin-bottom: 12px; }
+            .post-card img { height: auto; aspect-ratio: 5 / 3; }
+            .site-footer { margin-bottom: 96px; }
+
+            /* Menu bawah: ikon di atas label agar muat di layar kecil. */
+            #bottom-nav { width: calc(100% - 20px) !important; max-width: 480px; justify-content: space-between; gap: 2px; padding: 8px 10px; border-radius: 22px; }
+            #bottom-nav .nav-link { flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 2px; font-size: .68rem; line-height: 1.1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            #bottom-nav { height: auto; line-height: 1.1; }
+            #bottom-nav .nav-link .material-icons { height: auto; line-height: 1; font-size: 20px !important; }
+            .chatbot-panel { max-height: calc(100svh - 120px); }
+            body.nav-scrolled #bottom-nav { bottom: max(12px, env(safe-area-inset-bottom)); }
+            body.nav-scrolled .chatbot-launcher { bottom: 92px; }
+        }
+
+        /* HP layar kecil */
+        @media (max-width: 380px) {
+            :root { --site-gutter: 20px; }
+            .hero-benefit-grid { gap: 10px; }
+            .hero-benefit-card strong { font-size: .92rem; }
+        }
+
+        /* HP/tablet posisi landscape dengan layar pendek: banner tidak memenuhi layar. */
+        @media (orientation: landscape) and (max-height: 520px) {
+            :root { --nav-top: 8px; --nav-h: 60px; --hero-bars: 120px; }
+            .hero-slider { max-width: min(100%, 720px); }
+        }
+
+        /* Layar sentuh: tanpa efek hover yang membuat kartu "melompat". */
+        @media (hover: none) {
+            .feature-card:hover, .service-card:hover, .value-card:hover, .post-card:hover, .branch-card:hover,
+            .site-nav .nav-link:hover { transform: none; }
+        }
+
         <?php if ($ind_show == 0): ?>
             .slider .indicators { display: none !important; }
         <?php else: ?>
@@ -815,12 +977,9 @@ $render_branch_card = static function (array $branch) use ($escape): void {
             <img class="site-logo" src="logo-rei.png" alt="Logo Raja Emas Indonesia">
         </a>
         <div class="nav-links-container" id="primary-navigation" aria-label="Navigasi utama">
-            <a href="?page=home" class="nav-link">Beranda</a>
-            <a href="?page=about-us" class="nav-link"><span class="material-icons" aria-hidden="true">business</span>Tentang Kami</a>
-            <a href="?page=service" class="nav-link"><span class="material-icons" aria-hidden="true">diamond</span>Layanan</a>
-            <a href="?page=cabang" class="nav-link"><span class="material-icons" aria-hidden="true">storefront</span>Cabang</a>
-            <a href="?page=blog" class="nav-link"><span class="material-icons" aria-hidden="true">auto_stories</span>Blog</a>
-            <a href="?page=contact" class="nav-link"><span class="material-icons" aria-hidden="true">chat</span>Kontak</a>
+            <?php foreach ($site_pages as $nav_key => $nav_title): ?>
+                <a href="?page=<?= $escape($nav_key) ?>" class="nav-link"><?php if ($nav_key !== 'home'): ?><span class="material-icons" aria-hidden="true"><?= $escape(REI_SITE_PAGES[$nav_key]['icon']) ?></span><?php endif; ?><?= $escape($nav_title) ?></a>
+            <?php endforeach; ?>
         </div>
         <div class="language-switch" role="group" aria-label="Pilih bahasa">
             <button type="button" data-language="id" aria-pressed="true">ID</button>
@@ -832,14 +991,17 @@ $render_branch_card = static function (array $branch) use ($escape): void {
     </nav>
 
     <?php if (isset($site_pages[$requested_page ?? ''])): ?>
+        <?php if (!empty($site_page_data['custom_css'])): ?><style><?= $site_page_data['custom_css'] ?></style><?php endif; ?>
         <main class="page-shell">
-            <?php if ($requested_page === 'home'): ?>
+            <?php if ($site_page_custom_html !== ''): ?>
+                <div class="page-custom-content"><?= $site_page_data['custom_html'] ?></div>
+            <?php elseif ($requested_page === 'home'): ?>
                 <section class="hero">
                     <div class="hero-intro">
                         <div class="hero-intro-copy">
                             <span class="eyebrow">Outlet tersedia di berbagai kota</span>
                             <h1>Jual Emas Tanpa<br><span>Surat Lebih Mudah</span></h1>
-                            <p>Dapatkan penawaran terbaik disertai pengecekan keaslian emas dengan teknologi XRF gratis.</p>
+                            <?= $site_page_intro ?>
                             <div class="hero-intro-actions">
                                 <a class="button button-primary" href="?page=cabang"><span class="material-icons">location_on</span>Cari Outlet Terdekat</a>
                                 <a class="button button-secondary" href="?page=cabang">Lihat Outlet Kami</a>
@@ -888,6 +1050,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                         </div>
                     </div>
                 </section>
+                <?= $site_page_banner ?>
 
                 <section class="section">
                     <div class="section-heading"><div><span class="eyebrow">Layanan utama</span><h2>Jual beli emas dalam satu tempat</h2></div><a class="button button-secondary" href="?page=service">Semua layanan <span class="material-icons">arrow_forward</span></a></div>
@@ -970,7 +1133,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 </section>
 
             <?php elseif ($requested_page === 'about-us'): ?>
-                <header class="page-heading"><span class="eyebrow">About us · Profil perusahaan</span><h1>Raja Emas Indonesia,<br><span class="gold-text">transparan di setiap nilai.</span></h1><p>Jaringan toko emas yang membantu masyarakat menjual emas, membeli logam mulia, dan memahami nilai emasnya dengan proses yang jelas, aman, dan profesional.</p></header>
+                <header class="page-heading"><span class="eyebrow">About us · Profil perusahaan</span><h1>Raja Emas Indonesia,<br><span class="gold-text">transparan di setiap nilai.</span></h1><?= $site_page_intro ?></header><?= $site_page_banner ?>
                 <section class="about-profile">
                     <article class="about-profile-copy">
                         <span class="eyebrow">Siapa kami</span>
@@ -1017,7 +1180,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 <section class="about-source"><p><strong>Ingin mengenal Raja Emas lebih jauh?</strong><br>Pelajari profil, layanan, dan jaringan outlet melalui situs resmi kami.</p><a class="button button-secondary" href="https://rajaemas.id/tentang" target="_blank" rel="noopener noreferrer">Profil resmi <span class="material-icons">open_in_new</span></a></section>
 
             <?php elseif ($requested_page === 'service'): ?>
-                <header class="page-heading"><span class="eyebrow">Service · Layanan resmi</span><h1>Transaksi emas yang<br><span class="gold-text">jelas dan terpercaya.</span></h1><p>Raja Emas Indonesia membantu Anda menjual emas, memeriksa keaslian dan kadar dengan teknologi XRF, serta mendapatkan informasi produk langsung dari outlet resmi.</p></header>
+                <header class="page-heading"><span class="eyebrow">Service · Layanan resmi</span><h1>Transaksi emas yang<br><span class="gold-text">jelas dan terpercaya.</span></h1><?= $site_page_intro ?></header><?= $site_page_banner ?>
                 <section class="service-grid">
                     <article class="service-card service-card-highlight"><span class="material-icons">sell</span><h3>Jual emas</h3><p>Jual emas perhiasan, batangan, emas lama, patah, rusak, maupun tanpa surat setelah melalui proses pemeriksaan dan verifikasi.</p><a class="button button-primary" href="?page=cabang">Cari outlet <span class="material-icons">arrow_forward</span></a></article>
                     <article class="service-card glass"><span class="material-icons">biotech</span><h3>Cek keaslian dengan XRF</h3><p>Verifikasi keaslian dan kadar emas menggunakan teknologi XRF secara non-destruktif. Hasil pemeriksaan dapat dilihat langsung.</p><a class="button button-secondary" href="?page=contact">Tanya layanan <span class="material-icons">arrow_forward</span></a></article>
@@ -1065,7 +1228,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 <section class="section quick-contact"><div><h2>Siap berkonsultasi?</h2><p>Hubungi tim atau kunjungi outlet resmi Raja Emas Indonesia untuk informasi sesuai kebutuhan Anda.</p></div><a class="button" href="?page=contact">Hubungi kami <span class="material-icons">chat</span></a></section>
 
             <?php elseif ($requested_page === 'cabang'): ?>
-                <header class="page-heading"><span class="eyebrow">Branch · Lokasi kami</span><h1>Temukan Raja Emas<br><span class="gold-text">di dekat Anda.</span></h1><p>Pilih cabang untuk melihat informasi alamat, jam operasional, kontak, dan petunjuk arah. Silakan hubungi cabang terlebih dahulu untuk memastikan informasi kunjungan.</p></header>
+                <header class="page-heading"><span class="eyebrow">Branch · Lokasi kami</span><h1>Temukan Raja Emas<br><span class="gold-text">di dekat Anda.</span></h1><?= $site_page_intro ?></header><?= $site_page_banner ?>
                 <?php if (empty($branches_list)): ?>
                     <div class="empty-state">Informasi cabang belum tersedia saat ini. Silakan kembali lagi nanti untuk menemukan lokasi Raja Emas Indonesia.</div>
                 <?php else: ?>
@@ -1085,7 +1248,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 <?php endif; ?>
 
             <?php elseif ($requested_page === 'blog'): ?>
-                <header class="page-heading"><span class="eyebrow">Blog · Cerita dan inspirasi</span><h1>Wawasan untuk<br><span class="gold-text">pilihan yang berharga.</span></h1><p>Temukan artikel, informasi, dan inspirasi terbaru dari Raja Emas Indonesia.</p></header>
+                <header class="page-heading"><span class="eyebrow">Blog · Cerita dan inspirasi</span><h1>Wawasan untuk<br><span class="gold-text">pilihan yang berharga.</span></h1><?= $site_page_intro ?></header><?= $site_page_banner ?>
                 <?php if (empty($posts)): ?>
                     <div class="empty-state">Artikel terbaru sedang disiapkan. Kunjungi kembali halaman ini untuk membaca cerita dan informasi dari Raja Emas Indonesia.</div>
                 <?php else: ?>
@@ -1109,7 +1272,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 <?php endif; ?>
 
             <?php elseif ($requested_page === 'contact'): ?>
-                <header class="page-heading"><span class="eyebrow">Contact · Hubungi kami</span><h1>Kami siap membantu<br><span class="gold-text">perjalanan Anda.</span></h1><p>Punya pertanyaan tentang koleksi, layanan, atau rencana berkunjung? Hubungi cabang Raja Emas Indonesia yang paling sesuai untuk Anda.</p></header>
+                <header class="page-heading"><span class="eyebrow">Contact · Hubungi kami</span><h1>Kami siap membantu<br><span class="gold-text">perjalanan Anda.</span></h1><?= $site_page_intro ?></header><?= $site_page_banner ?>
                 <section class="contact-layout" aria-label="Formulir dan informasi kontak">
                     <div class="contact-form-panel">
                         <span class="eyebrow">Kirim pesan</span>
@@ -1176,6 +1339,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
                 </section>
             <?php endif; ?>
         </main>
+        <?php if (!empty($site_page_data['custom_js'])): ?><script><?= $site_page_data['custom_js'] ?></script><?php endif; ?>
 
     <!-- Tampilan Standar Beranda / Halaman Lain -->
     <?php elseif ($current_page_data): ?>
@@ -1323,10 +1487,10 @@ $render_branch_card = static function (array $branch) use ($escape): void {
     <button class="chatbot-launcher" type="button" data-chat-open aria-label="Buka chatbot Raja Emas" aria-expanded="false" aria-controls="chatbot-panel"><span class="material-icons">chat</span></button>
 
     <nav id="bottom-nav" class="glass">
-        <a href="?page=home" class="nav-link"><i class="material-icons" style="font-size: 18px;">home</i> Beranda</a>
-        <a href="?page=cabang" class="nav-link"><i class="material-icons" style="font-size: 18px;">storefront</i> Cabang</a>
-        <a href="?page=blog" class="nav-link"><i class="material-icons" style="font-size: 18px;">auto_stories</i> Blog</a>
-        <a href="?page=contact" class="nav-link"><i class="material-icons" style="font-size: 18px;">chat</i> Kontak</a>
+        <a href="?page=home" class="nav-link"><i class="material-icons" style="font-size: 18px;">home</i> <?= $escape($site_pages['home']) ?></a>
+        <a href="?page=cabang" class="nav-link"><i class="material-icons" style="font-size: 18px;">storefront</i> <?= $escape($site_pages['cabang']) ?></a>
+        <a href="?page=blog" class="nav-link"><i class="material-icons" style="font-size: 18px;">auto_stories</i> <?= $escape($site_pages['blog']) ?></a>
+        <a href="?page=contact" class="nav-link"><i class="material-icons" style="font-size: 18px;">chat</i> <?= $escape($site_pages['contact']) ?></a>
         <a href="#" onclick="window.scrollTo({top: 0, behavior: 'smooth'}); return false;" class="nav-link"><i class="material-icons" style="font-size: 18px;">arrow_upward</i> Atas</a>
     </nav>
 
@@ -1865,13 +2029,8 @@ $render_branch_card = static function (array $branch) use ($escape): void {
         
         window.addEventListener("scroll", () => {
             let currentScroll = window.pageYOffset || document.documentElement.scrollTop;
-            if (currentScroll > lastScroll && currentScroll > 50) {
-                topNav.style.top = "-100px";
-                bottomNav.style.bottom = "30px";
-            } else {
-                topNav.style.top = "20px";
-                bottomNav.style.bottom = "-100px";
-            }
+            // Posisi navbar atas/bawah diatur CSS lewat kelas ini (lihat "Lapisan responsif").
+            document.body.classList.toggle("nav-scrolled", currentScroll > lastScroll && currentScroll > 50);
             lastScroll = currentScroll <= 0 ? 0 : currentScroll;
         });
     </script>
