@@ -8,6 +8,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 require 'config.php';
+require_once __DIR__ . '/site-pages.php';
 
 // Otomatis buat tabel branches jika belum ada
 try {
@@ -141,17 +142,23 @@ if ($page === 'pages' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    try {
-        $stmt = $pdo->prepare("INSERT INTO posts (title, slug, content, custom_html, custom_css, custom_js, featured_image, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'page')");
-        $stmt->execute([$title, $slug, $content, $custom_html, $custom_css, $custom_js, $featured_image]);
-        $msg = "Halaman kustom berhasil dibuat!";
-    } catch (PDOException $e) {
-        $msg = "Error Database: " . $e->getMessage();
+    if (rei_site_page_key($slug) !== null) {
+        $msg = "Slug /{$slug} sudah dipakai halaman website. Edit halaman tersebut di daftar Halaman Website.";
+    } else {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO posts (title, slug, content, custom_html, custom_css, custom_js, featured_image, type) VALUES (?, ?, ?, ?, ?, ?, ?, 'page')");
+            $stmt->execute([$title, $slug, $content, $custom_html, $custom_css, $custom_js, $featured_image]);
+            $msg = "Halaman kustom berhasil dibuat!";
+        } catch (PDOException $e) {
+            $msg = "Error Database: " . $e->getMessage();
+        }
     }
 }
 if ($page === 'pages' && isset($_GET['delete_page'])) {
     $id = $_GET['delete_page'];
-    $pdo->prepare("DELETE FROM posts WHERE id = ? AND type = 'page'")->execute([$id]);
+    // Halaman website bawaan tidak boleh dihapus, hanya diedit.
+    $placeholders = implode(',', array_fill(0, count(rei_site_page_slugs()), '?'));
+    $pdo->prepare("DELETE FROM posts WHERE id = ? AND type = 'page' AND slug NOT IN ($placeholders)")->execute([$id, ...rei_site_page_slugs()]);
     header("Location: admin.php?page=pages");
     exit;
 }
@@ -222,8 +229,12 @@ try {
     $posts = $pdo->query("SELECT posts.*, post_categories.name as category_name FROM posts LEFT JOIN post_categories ON posts.category_id = post_categories.id WHERE posts.type='post' ORDER BY posts.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) { $posts = []; }
 
+// Halaman website bawaan (Beranda, Tentang Kami, dst.) dan halaman kustom.
+$site_page_rows = $page === 'pages' ? rei_ensure_site_pages($pdo) : rei_load_site_pages($pdo);
+$site_page_ids = array_filter(array_map(static fn ($row) => $row['id'] ?? null, $site_page_rows));
 try {
     $pages_list = $pdo->query("SELECT * FROM posts WHERE type='page' ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+    $pages_list = array_values(array_filter($pages_list, static fn ($row) => !in_array($row['id'], $site_page_ids, false)));
 } catch (PDOException $e) { $pages_list = []; }
 
 try {
@@ -649,17 +660,49 @@ foreach($chart_data as $cd) {
                                 <button type="submit" class="w-full bg-cyan-600 text-white text-sm font-medium py-2.5 rounded-xl hover:bg-cyan-700 transition">Publikasikan</button>
                             </form>
                         </div>
-                        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
-                            <h3 class="font-semibold text-gray-800 mb-4">Daftar Halaman</h3>
+                        <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                            <h3 class="font-semibold text-gray-800">Halaman Website</h3>
+                            <p class="text-xs text-gray-500 mt-1 mb-4">Halaman utama di navigasi website. Judul tampil di menu navigasi, Konten menjadi teks pembuka, Gambar tampil sebagai banner, dan HTML Kustom (jika diisi) menggantikan seluruh isi halaman.</p>
+                            <table class="w-full text-left border-collapse">
+                                <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-4">Judul</th><th class="py-3 px-4">Slug</th><th class="py-3 px-4">Status</th><th class="py-3 px-4 text-center">Aksi</th></tr></thead>
+                                <tbody class="divide-y divide-gray-100 text-sm">
+                                    <?php foreach ($site_page_rows as $site_key => $sp): ?>
+                                    <tr class="hover:bg-gray-50 transition">
+                                        <td class="py-3 px-4 font-medium text-gray-900"><span class="material-icons text-sm text-cyan-600 align-middle mr-1"><?= htmlspecialchars(REI_SITE_PAGES[$site_key]['icon'], ENT_QUOTES, 'UTF-8') ?></span><?= htmlspecialchars(rei_site_page_title($site_key, $sp), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
+                                        <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= htmlspecialchars($site_key, ENT_QUOTES, 'UTF-8') ?></td>
+                                        <td class="py-3 px-4 text-xs">
+                                            <?php if (!$sp): ?><span class="text-gray-400">Belum terhubung</span>
+                                            <?php elseif (trim((string) ($sp['custom_html'] ?? '')) !== ''): ?><span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">HTML kustom</span>
+                                            <?php else: ?><span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Tampilan bawaan</span><?php endif; ?>
+                                        </td>
+                                        <td class="py-3 px-4 text-center space-x-2">
+                                            <a href="index.php?page=<?= rawurlencode($site_key) ?>" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                                <span class="material-icons text-xs">visibility</span> Lihat
+                                            </a>
+                                            <?php if ($sp): ?>
+                                            <a href="edit-page.php?id=<?= (int) $sp['id'] ?>" class="text-amber-600 hover:text-amber-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                                <span class="material-icons text-xs">edit</span> Edit
+                                            </a>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                            <h3 class="font-semibold text-gray-800 mb-4">Halaman Kustom</h3>
+                            <?php if (empty($pages_list)): ?><p class="text-sm text-gray-400">Belum ada halaman kustom.</p><?php endif; ?>
                             <table class="w-full text-left border-collapse">
                                 <thead><tr class="bg-gray-50 text-gray-400 text-xs font-semibold uppercase border-b border-gray-100"><th class="py-3 px-4">Judul</th><th class="py-3 px-4">Slug</th><th class="py-3 px-4 text-center">Aksi</th></tr></thead>
                                 <tbody class="divide-y divide-gray-100 text-sm">
                                     <?php foreach($pages_list as$p): ?>
                                     <tr class="hover:bg-gray-50 transition">
                                         <td class="py-3 px-4 font-medium text-gray-900"><?= htmlspecialchars($p['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></td>
-                                        <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= $p['slug'] ?></td>
+                                        <td class="py-3 px-4 text-cyan-600 text-xs font-mono">/<?= htmlspecialchars($p['slug'], ENT_QUOTES, 'UTF-8') ?></td>
                                         <td class="py-3 px-4 text-center space-x-2">
-                                            <a href="http://localhost/rei/" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
+                                            <a href="index.php?page=<?= rawurlencode($p['slug']) ?>" target="_blank" class="text-cyan-600 hover:text-cyan-800 text-xs font-medium inline-flex items-center gap-0.5">
                                                 <span class="material-icons text-xs">visibility</span> Lihat
                                             </a>
                                             <a href="edit-page.php?id=<?= $p['id'] ?>" class="text-amber-600 hover:text-amber-800 text-xs font-medium inline-flex items-center gap-0.5">
@@ -673,6 +716,7 @@ foreach($chart_data as $cd) {
                                     <?php endforeach; ?>
                                 </tbody>
                             </table>
+                        </div>
                         </div>
                     </div>
 

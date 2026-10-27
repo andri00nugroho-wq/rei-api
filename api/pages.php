@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/api-config.php';
 require_once dirname(__DIR__) . '/config.php';
+require_once dirname(__DIR__) . '/site-pages.php';
 
 /**
  * Mengirim respons JSON.
@@ -311,6 +312,10 @@ try {
         $input = pageReadJson();
         $data = pageValidateInput($input, true);
 
+        if (rei_site_page_key($data['slug']) !== null) {
+            pageJsonResponse(409, false, 'Slug sudah digunakan halaman website.');
+        }
+
         $check = $pdo->prepare(
             'SELECT id FROM posts WHERE slug = :slug LIMIT 1'
         );
@@ -377,18 +382,26 @@ try {
     }
 
     $find = $pdo->prepare(
-        "SELECT id FROM posts WHERE id = :id AND type = 'page' LIMIT 1"
+        "SELECT id, slug FROM posts WHERE id = :id AND type = 'page' LIMIT 1"
     );
     $find->execute(['id' => $id]);
+    $existingPage = $find->fetch();
 
-    if (!$find->fetch()) {
+    if (!$existingPage) {
         pageJsonResponse(404, false, 'Halaman tidak ditemukan.');
     }
+
+    // Halaman website bawaan (Beranda, Tentang Kami, dst.) tidak boleh dihapus atau diganti slug-nya.
+    $isSitePage = rei_site_page_key((string) $existingPage['slug']) !== null;
 
     /*
      * DELETE: hapus halaman.
      */
     if ($method === 'DELETE') {
+        if ($isSitePage) {
+            pageJsonResponse(409, false, 'Halaman website tidak dapat dihapus, hanya diedit.');
+        }
+
         $delete = $pdo->prepare(
             "DELETE FROM posts WHERE id = :id AND type = 'page'"
         );
@@ -402,6 +415,15 @@ try {
      */
     $input = pageReadJson();
     $data = pageValidateInput($input, false);
+
+    if (isset($data['slug']) && $data['slug'] !== $existingPage['slug']) {
+        if ($isSitePage) {
+            pageJsonResponse(409, false, 'Slug halaman website tidak dapat diubah.');
+        }
+        if (rei_site_page_key($data['slug']) !== null) {
+            pageJsonResponse(409, false, 'Slug sudah digunakan halaman website.');
+        }
+    }
 
     if (isset($data['slug'])) {
         $check = $pdo->prepare(
