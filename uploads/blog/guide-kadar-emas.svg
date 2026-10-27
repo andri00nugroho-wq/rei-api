@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title">
+  <title id="title">Ilustrasi mengenal kadar emas</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#fbf7ed"/><stop offset="1" stop-color="#ead9ad"/></linearGradient>
+    <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#f6dc91"/><stop offset="1" stop-color="#bd8b2d"/></linearGradient>
+  </defs>
+  <rect width="1200" height="720" rx="36" fill="url(#bg)"/>
+  <circle cx="920" cy="140" r="190" fill="#fff" opacity=".42"/>
+  <path d="M0 565c210-90 340-75 520 8s400 82 680-28v175H0z" fill="#e6d5ae"/>
+  <g transform="translate(315 205)">
+    <path d="m0 112 185-78 278 77-185 82z" fill="#f7e5b7"/>
+    <path d="m0 112 278 81v185L0 294z" fill="#c89b45"/>
+    <path d="m278 193 185-82v183l-185 84z" fill="#a97825"/>
+    <path d="m76 119 109-45 164 47-110 49z" fill="url(#gold)" stroke="#946b25" stroke-width="5"/>
+    <text x="155" y="134" fill="#72531e" font-family="Georgia,serif" font-size="30" font-weight="700">Au</text>
+  </g>
+  <g transform="translate(760 330) rotate(-12)">
+    <circle r="122" fill="none" stroke="#553c21" stroke-width="24"/>
+    <circle r="92" fill="#fff9e9" opacity=".55"/>
+    <path d="M83 88 190 196" stroke="#553c21" stroke-width="38" stroke-linecap="round"/>
+    <text x="-47" y="17" fill="#79581d" font-family="Arial,sans-serif" font-size="26" font-weight="700">18K</text>
+    <path d="M-38 39h76" stroke="#bd8b2d" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <g fill="#fff8e3" opacity=".9"><circle cx="225" cy="185" r="9"/><circle cx="260" cy="153" r="5"/><path d="M950 510v42m-21-21h42" stroke="#fff8e3" stroke-width="8" stroke-linecap="round"/></g>
+</svg>

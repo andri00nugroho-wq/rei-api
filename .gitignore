@@ -1,0 +1,21 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Database credentials and configuration
+config.php
+
+# Local database dumps
+*.sql
+*.sql.gz
+
+# Debug and temporary files
+debug-branches.html
+*.log
+
+# Dependencies and generated files
+vendor/
+node_modules/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title">
+  <title id="title">Ilustrasi panduan belanja emas dengan bijak</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#f8f5ee"/><stop offset="1" stop-color="#e5d6b7"/></linearGradient>
+    <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#f6dd97"/><stop offset="1" stop-color="#b98529"/></linearGradient>
+  </defs>
+  <rect width="1200" height="720" rx="36" fill="url(#bg)"/>
+  <circle cx="955" cy="145" r="150" fill="#fff" opacity=".43"/>
+  <path d="M0 573c211-78 415-83 607-8s394 72 593-11v166H0z" fill="#ddcba6"/>
+  <g transform="translate(160 160)">
+    <path d="M0 155 221 18l221 137v272H0z" fill="#69454a"/>
+    <path d="M-18 157 221 0l239 157" fill="none" stroke="#a87831" stroke-width="24" stroke-linejoin="round"/>
+    <rect x="51" y="211" width="120" height="119" rx="10" fill="#f1d99e"/>
+    <rect x="251" y="211" width="120" height="119" rx="10" fill="#f1d99e"/>
+    <path d="M82 264h58m-29-29v58m171-29h58m-29-29v58" stroke="#916925" stroke-width="10" stroke-linecap="round"/>
+    <rect x="176" y="273" width="90" height="154" rx="8" fill="#3b2d38"/>
+  </g>
+  <g transform="translate(770 180)">
+    <path d="M130 10v370m-130-250h260M15 130 0 245h95L80 130m100 0-15 115h95l-15-115" fill="none" stroke="#614a36" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-10 245h115c-4 54-20 82-57 82s-54-28-58-82zm100 0h115c-4 54-20 82-57 82s-54-28-58-82z" fill="#ecd48e" stroke="#ab7e32" stroke-width="9"/>
+    <path d="M65 382h130m-108-28 43 28 43-28" fill="none" stroke="#614a36" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="130" cy="87" r="43" fill="url(#gold)" stroke="#916925" stroke-width="8"/>
+    <text x="108" y="99" fill="#71501b" font-family="Georgia,serif" font-size="30" font-weight="700">Au</text>
+  </g>
+  <path d="M604 390c32-42 66-51 101-27" fill="none" stroke="#c09443" stroke-width="12" stroke-linecap="round"/>
+</svg>

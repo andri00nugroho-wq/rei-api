@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title">
+  <title id="title">Ilustrasi memilih perhiasan untuk sehari-hari</title>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#f8f4ec"/><stop offset="1" stop-color="#e7d9bd"/></linearGradient>
+    <linearGradient id="gold" x2="0" y2="1"><stop stop-color="#f6dc91"/><stop offset="1" stop-color="#ba8423"/></linearGradient>
+  </defs>
+  <rect width="1200" height="720" rx="36" fill="url(#bg)"/>
+  <circle cx="920" cy="170" r="150" fill="#fff" opacity=".5"/>
+  <path d="M0 565c210-92 387-76 566-7s421 72 634-14v176H0z" fill="#dfcfad"/>
+  <g transform="translate(205 95)">
+    <path d="M260 28c-106 0-194 85-194 189v73h388v-73C454 113 366 28 260 28z" fill="#37283a"/>
+    <path d="M102 290c45-38 98-57 158-57s113 19 158 57v189H102z" fill="#9b6e61"/>
+    <path d="M190 226c0 49 31 83 70 83s70-34 70-83" fill="none" stroke="#d6a184" stroke-width="18"/>
+    <path d="M177 475v-88c0-49 37-89 83-89s83 40 83 89v88" fill="none" stroke="#f1eee7" stroke-width="12"/>
+    <path d="M208 325 260 394l52-69" fill="none" stroke="url(#gold)" stroke-width="12"/>
+    <circle cx="208" cy="407" r="17" fill="url(#gold)"/><circle cx="312" cy="407" r="17" fill="url(#gold)"/>
+    <path d="M196 440c0-36 29-65 64-65s64 29 64 65" fill="none" stroke="url(#gold)" stroke-width="11"/>
+  </g>
+  <g transform="translate(790 275)">
+    <path d="M0 115c74 86 172 86 246 0" fill="none" stroke="url(#gold)" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="123" cy="192" r="34" fill="#fff9e7" stroke="#b7832c" stroke-width="12"/>
+    <path d="M120 150 95 181h50z" fill="#fff" opacity=".75"/>
+    <path d="M42 20v70m-26-35h52" stroke="#bd8b2d" stroke-width="9" stroke-linecap="round"/>
+  </g>
+  <g fill="#fff" opacity=".8"><circle cx="170" cy="188" r="8"/><circle cx="1015" cy="500" r="7"/><path d="M1030 240v36m-18-18h36" stroke="#fff" stroke-width="7" stroke-linecap="round"/></g>
+</svg>
