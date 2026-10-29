@@ -847,10 +847,14 @@ $render_branch_card = static function (array $branch) use ($escape): void {
         .page-custom-content { margin-top: var(--shell-top); }
         .hero-slider { margin-top: 0; }
 
-        /* Banner: rasio asli 2:1, tidak ditarik, dan selalu muat di tinggi layar. */
+        /* Semua halaman memakai lebar yang sama dengan navbar. */
+        .site-nav { width: min(var(--site-max-width), calc(100% - var(--site-gutter))) !important; max-width: var(--site-max-width) !important; }
+
+        /* Banner: selebar navbar, rasio asli 2:1 tanpa ditarik. Di layar pendek tingginya dibatasi
+           (bagian atas/bawah gambar sedikit terpotong) agar banner tetap muat di layar. */
         .hero-slide img,
-        .hero-slide img[loading] { height: auto !important; aspect-ratio: 2 / 1 !important; object-fit: cover !important; }
-        .hero-slider { width: 100%; max-width: min(1680px, max(560px, calc((100svh - var(--shell-top) - var(--hero-bars) - 16px) * 2))); margin-left: auto; margin-right: auto; }
+        .hero-slide img[loading] { width: 100%; height: auto !important; aspect-ratio: 2 / 1 !important; max-height: max(300px, calc(100svh - var(--shell-top) - 40px)); object-fit: cover !important; object-position: center; }
+        .hero-slider { width: 100%; max-width: none; margin-left: 0; margin-right: 0; }
         .hero-slide-caption { flex-wrap: wrap; }
         .hero-slide-caption > div { flex: 1 1 260px; min-width: 0; }
         .hero-slide-caption .button { flex: 0 0 auto; white-space: nowrap; }
@@ -865,7 +869,7 @@ $render_branch_card = static function (array $branch) use ($escape): void {
         .page-heading { padding: clamp(26px, 4.5vw, 64px); }
         .page-banner img { max-height: min(460px, 55svh); }
         .content-panel h2 { margin: .25em 0 .5em; line-height: 1.15; }
-        .hero-intro { margin-bottom: clamp(8px, 2vw, 34px); }
+        .hero-intro { max-width: none; margin-bottom: clamp(8px, 2vw, 34px); }
 
         /* Navbar atas disembunyikan dan menu bawah dimunculkan saat halaman di-scroll ke bawah. */
         #top-nav, .chatbot-launcher { transition: top .4s ease-in-out, bottom .3s ease; }
@@ -948,7 +952,6 @@ $render_branch_card = static function (array $branch) use ($escape): void {
         /* HP/tablet posisi landscape dengan layar pendek: banner tidak memenuhi layar. */
         @media (orientation: landscape) and (max-height: 520px) {
             :root { --nav-top: 8px; --nav-h: 60px; --hero-bars: 120px; }
-            .hero-slider { max-width: min(100%, 720px); }
         }
 
         /* Layar sentuh: tanpa efek hover yang membuat kartu "melompat". */
