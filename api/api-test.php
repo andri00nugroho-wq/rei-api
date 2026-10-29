@@ -398,13 +398,16 @@ Accept: application/json</pre></div>
   <section id="daftar-cabang" data-spy class="doc">
     <div class="flex flex-wrap items-center gap-3"><span class="mt get lg">GET</span><h2 class="h2 !m-0">Daftar cabang</h2></div>
     <p class="mt-2 font-mono text-sm text-slate-500">/branches.php</p>
-    <p class="mt-3 max-w-2xl text-sm text-slate-600">Mengembalikan daftar cabang secara berhalaman.</p>
+    <p class="mt-3 max-w-2xl text-sm text-slate-600">Mengembalikan semua cabang secara berhalaman, termasuk cabang yang berstatus closed. Jarak diurutkan terdekat jika koordinat pengguna diberikan.</p>
+    <p class="mt-2 max-w-2xl text-xs text-slate-500">Field baru memerlukan migrasi <code class="ic">sql/branch-api-revision.sql</code>. Nilai status, koordinat, atau wilayah yang belum terverifikasi dibiarkan null.</p>
     <div class="mt-6 grid gap-8 xl:grid-cols-2">
       <div>
         <h3 class="h3">Parameter query</h3>
         <div class="tw mt-2"><table><thead><tr><th>Nama</th><th>Tipe</th><th>Keterangan</th></tr></thead><tbody>
           <tr><td><code class="ic">limit</code></td><td>integer</td><td>Jumlah data per halaman. Penguji menyediakan 10, 25, 50, 100.</td></tr>
           <tr><td><code class="ic">offset</code></td><td>integer</td><td>Jumlah data yang dilewati. Mulai dari 0.</td></tr>
+          <tr><td><code class="ic">latitude</code> + <code class="ic">longitude</code></td><td>decimal</td><td>Koordinat pengguna (wajib diberikan berpasangan). Menghitung <code class="ic">distance_km</code> dan mengurutkan cabang terdekat.</td></tr>
+          <tr><td><code class="ic">status</code></td><td>string</td><td>Filter opsional: active, coming_soon, temp_closed, atau closed. Tanpa filter, semua status disertakan.</td></tr>
         </tbody></table></div>
         <h3 class="h3 mt-6">Header</h3>
         <div class="tw mt-2"><table><thead><tr><th>Nama</th><th>Wajib</th><th>Nilai</th></tr></thead><tbody>
@@ -429,6 +432,14 @@ Accept: application/json</pre></div>
       "address": "Jl. Contoh No. 1, Jakarta",
       "phone": "0812-0000-0000",
       "hours": "09.00 - 17.00",
+      "latitude": null,
+      "longitude": null,
+      "distance_km": null,
+      "status": null,
+      "opening_date": null,
+      "city": null,
+      "province": null,
+      "district": null,
       "map_link": "https://maps.google.com/...",
       "map_embed_url": "https://www.google.com/maps/embed?..."
     }
@@ -451,6 +462,14 @@ Accept: application/json</pre></div>
       <tr><td><code class="ic">address</code></td><td>string</td><td>Alamat lengkap.</td></tr>
       <tr><td><code class="ic">phone</code></td><td>string</td><td>Nomor telepon atau WhatsApp.</td></tr>
       <tr><td><code class="ic">hours</code></td><td>string</td><td>Jam operasional.</td></tr>
+      <tr><td><code class="ic">latitude</code></td><td>decimal | null</td><td>Lintang outlet antara -90 dan 90.</td></tr>
+      <tr><td><code class="ic">longitude</code></td><td>decimal | null</td><td>Bujur outlet antara -180 dan 180.</td></tr>
+      <tr><td><code class="ic">distance_km</code></td><td>decimal | null</td><td>Jarak kilometer dari koordinat pengguna; null jika koordinat tidak tersedia.</td></tr>
+      <tr><td><code class="ic">status</code></td><td>string | null</td><td>active, coming_soon, temp_closed, atau closed. Null menandakan status belum terverifikasi.</td></tr>
+      <tr><td><code class="ic">opening_date</code></td><td>date | null</td><td>Tanggal YYYY-MM-DD atau null jika belum diketahui.</td></tr>
+      <tr><td><code class="ic">city</code></td><td>string | null</td><td>Nama kabupaten/kota.</td></tr>
+      <tr><td><code class="ic">province</code></td><td>string | null</td><td>Nama provinsi.</td></tr>
+      <tr><td><code class="ic">district</code></td><td>string | null</td><td>Nama kecamatan jika tersedia.</td></tr>
       <tr><td><code class="ic">map_link</code></td><td>string (URL)</td><td>Tautan Google Maps.</td></tr>
       <tr><td><code class="ic">map_embed_url</code></td><td>string (URL)</td><td>URL embed peta.</td></tr>
     </tbody></table></div>

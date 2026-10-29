@@ -5,14 +5,6 @@ declare(strict_types=1);
 const SOURCE_URL = 'https://rajaemasindonesia.co.id/#lokasi';
 const SITE_ORIGIN = 'https://rajaemasindonesia.co.id';
 
-// Sesuaikan dengan konfigurasi database Laragon Anda.
-// PENTING: harus database yang sama dengan yang dibaca halaman admin/CMS.
-const DB_HOST = 'localhost';
-const DB_PORT = '3306';
-const DB_NAME = 'dev';
-const DB_USER = 'admin_api';
-const DB_PASS = 'Majuterusrajaemas';
-
 const DB_TABLE = 'branches';
 
 const DELETE_MISSING = true;
@@ -57,18 +49,15 @@ const DIRECTION_LABEL_REGEX =
 
 function connectDatabase(): PDO
 {
-    $dsn = sprintf(
-        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-        DB_HOST,
-        DB_PORT,
-        DB_NAME
-    );
+    global $pdo;
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
+        require_once __DIR__ . DIRECTORY_SEPARATOR . 'config.php';
+    }
+    if (!($pdo instanceof PDO)) {
+        throw new RuntimeException('Koneksi PDO tidak tersedia dari config.php.');
+    }
 
-    return new PDO($dsn, DB_USER, DB_PASS, [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES   => false,
-    ]);
+    return $pdo;
 }
 
 // =====================================================
@@ -179,10 +168,7 @@ function normalizeText(string $text): string
     return trim($text);
 }
 
-/**
- * Mendapatkan nomor dari format:
- * # 01 Jakarta Utara | 01 Jakarta Utara | Cabang 01 | 1. Jakarta Utara
- */
+
 function extractBranchNumber(string $text): string
 {
     $text = normalizeText($text);
@@ -653,6 +639,8 @@ function parseSegment(array $marker, array $slice): array
     $phones = [];
     $hours = [];
     $notes = '';
+    $status = null;
+    $openingDate = null;
     $addressParts = [];
     $expectPhone = false;
 
@@ -664,6 +652,24 @@ function parseSegment(array $marker, array $slice): array
 
         if ($clean === '') {
             continue; // baris yang isinya hanya URL
+        }
+
+        if (preg_match('/^(?:status(?:\s+operasional)?|operasional)\s*[:\-]\s*(active|aktif|beroperasi|coming_soon|coming\s+soon|akan\s+dibuka|temp_closed|tutup\s+sementara|closed(?:\s+temporarily|\s+permanently)?|tutup\s+permanen)$/iu', $clean, $statusMatch)) {
+            $statusText = mb_strtolower(trim($statusMatch[1]), 'UTF-8');
+            $status = match ($statusText) {
+                'active', 'aktif', 'beroperasi' => 'active',
+                'coming_soon', 'coming soon', 'akan dibuka' => 'coming_soon',
+                'temp_closed', 'tutup sementara', 'closed temporarily' => 'temp_closed',
+                'closed', 'closed permanently', 'tutup permanen' => 'closed',
+                default => null,
+            };
+            continue;
+        }
+
+        if (preg_match('/^(?:tanggal pembukaan|tanggal mulai beroperasi|opening date)\s*[:\-]\s*(\d{4})-(\d{2})-(\d{2})$/iu', $clean, $dateMatch)
+            && checkdate((int) $dateMatch[2], (int) $dateMatch[3], (int) $dateMatch[1])) {
+            $openingDate = $dateMatch[1] . '-' . $dateMatch[2] . '-' . $dateMatch[3];
+            continue;
         }
 
         // Jam operasional (jika "Catatan:" menempel di baris yang sama, pisahkan).
@@ -771,6 +777,8 @@ function parseSegment(array $marker, array $slice): array
         'phone'         => implode(' / ', $phones),
         'hours'         => implode('; ', $hours),
         'notes'         => $notes,
+        'status'        => $status,
+        'opening_date'  => $openingDate,
         'map_embed_url' => pickMapEmbedUrl($frames, $links, $lines),
         'map_link'      => pickDirectionUrl($links),
     ];
@@ -899,7 +907,7 @@ function parseBranches(string $html, callable $log): array
         );
 
         foreach ($branch as $field => $value) {
-            if ($value !== '') {
+            if ($value !== '' && $value !== null) {
                 $branches[$key][$field] = $value;
             }
         }
@@ -985,6 +993,22 @@ function ensureTable(PDO $pdo): void
             `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     ");
+
+    $newColumns = [
+        'latitude' => 'DECIMAL(10,7) NULL',
+        'longitude' => 'DECIMAL(10,7) NULL',
+        'status' => "ENUM('active','coming_soon','temp_closed','closed') NULL DEFAULT NULL",
+        'opening_date' => 'DATE NULL',
+        'city' => 'VARCHAR(150) NULL',
+        'province' => 'VARCHAR(150) NULL',
+        'district' => 'VARCHAR(150) NULL',
+    ];
+
+    foreach ($newColumns as $column => $definition) {
+        if (!tableHasColumn($pdo, $column)) {
+            $pdo->exec("ALTER TABLE `" . DB_TABLE . "` ADD COLUMN `{$column}` {$definition}");
+        }
+    }
 }
 
 function tableHasColumn(PDO $pdo, string $column): bool
@@ -1007,6 +1031,218 @@ function tableHasColumn(PDO $pdo, string $column): bool
     }
 
     return $cache[$key];
+}
+
+/** Extract an exact coordinate pair embedded in a Google Maps URL. */
+function coordinatesFromMapsUrl(string $url): ?array
+{
+    foreach (array_unique([$url, rawurldecode($url)]) as $candidate) {
+        $patterns = [
+            '~!3d(-?\d{1,2}(?:\.\d+)?)!4d(-?\d{1,3}(?:\.\d+)?)~i',
+            '~(?:[?&](?:q|query|destination)=)(-?\d{1,2}(?:\.\d+)?)[,%20]+(-?\d{1,3}(?:\.\d+)?)~i',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $candidate, $matches)) {
+                $lat = (float) $matches[1];
+                $lng = (float) $matches[2];
+                if ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180) {
+                    return ['latitude' => number_format($lat, 7, '.', ''), 'longitude' => number_format($lng, 7, '.', '')];
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+function &mapsShortUrlCache(): array
+{
+    static $cache = [];
+    return $cache;
+}
+
+/** Resolve Google short links in parallel, without an API key. */
+function expandMapsShortUrls(array $urls): array
+{
+    $cache =& mapsShortUrlCache();
+    $pending = [];
+    foreach (array_unique($urls) as $url) {
+        $url = trim((string) $url);
+        if ($url === '' || isset($cache[$url])) {
+            continue;
+        }
+        $cache[$url] = $url;
+        if (function_exists('curl_init') && preg_match('~^https?://(?:maps\.app\.goo\.gl|share\.google)/~i', $url)) {
+            $pending[] = $url;
+        }
+    }
+
+    if (!function_exists('curl_multi_init') || $pending === []) {
+        return $cache;
+    }
+
+    $requestBatch = static function (array $batch, bool $useGet) use (&$cache): void {
+        $multi = curl_multi_init();
+        $handles = [];
+        foreach ($batch as $url) {
+            $handle = curl_init($url);
+            curl_setopt_array($handle, [
+                CURLOPT_NOBODY => !$useGet,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS => 8,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 6,
+                CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; REIBranchSync/1.0)',
+            ] + ($useGet ? [CURLOPT_RANGE => '0-0'] : []));
+            curl_multi_add_handle($multi, $handle);
+            $handles[$url] = $handle;
+        }
+
+        $running = null;
+        do {
+            do {
+                $multiStatus = curl_multi_exec($multi, $running);
+            } while ($multiStatus === CURLM_CALL_MULTI_PERFORM);
+            if ($running && curl_multi_select($multi, 0.25) === -1) {
+                usleep(100000);
+            }
+        } while ($running && $multiStatus === CURLM_OK);
+
+        foreach ($handles as $url => $handle) {
+            $expanded = (string) curl_getinfo($handle, CURLINFO_EFFECTIVE_URL);
+            if ($expanded !== '') {
+                $cache[$url] = $expanded;
+            }
+            curl_multi_remove_handle($multi, $handle);
+        }
+    };
+
+    foreach (array_chunk($pending, 24) as $batch) {
+        $requestBatch($batch, false);
+    }
+
+    $needsGet = array_values(array_filter($pending, static function (string $url) use (&$cache): bool {
+        $expanded = $cache[$url] ?? $url;
+        return coordinatesFromMapsUrl($expanded) === null
+            && preg_match('~^https?://(?:maps\.app\.goo\.gl|share\.google)/~i', $expanded) === 1;
+    }));
+    foreach (array_chunk($needsGet, 24) as $batch) {
+        $requestBatch($batch, true);
+    }
+
+    return $cache;
+}
+
+function expandMapsShortUrl(string $url): string
+{
+    $cache =& mapsShortUrlCache();
+    if (!isset($cache[$url])) {
+        expandMapsShortUrls([$url]);
+    }
+    return $cache[$url] ?? $url;
+}
+
+/** Read region names from the branch address/title without fabricating missing values. */
+function branchAreasFromText(string $address, string $title): array
+{
+    $text = normalizeText($address . ', ' . $title);
+    $provinceNames = [
+        'Daerah Khusus Ibukota Jakarta' => 'DKI Jakarta', 'DKI Jakarta' => 'DKI Jakarta',
+        'Daerah Istimewa Yogyakarta' => 'DI Yogyakarta', 'DI Yogyakarta' => 'DI Yogyakarta',
+        'Nusa Tenggara Timur' => 'Nusa Tenggara Timur', 'Nusa Tenggara Barat' => 'Nusa Tenggara Barat',
+        'Kepulauan Bangka Belitung' => 'Kepulauan Bangka Belitung', 'Bangka Belitung' => 'Kepulauan Bangka Belitung',
+        'Kepulauan Riau' => 'Kepulauan Riau', 'Sumatera Selatan' => 'Sumatera Selatan',
+        'Sumatera Barat' => 'Sumatera Barat', 'Sumatera Utara' => 'Sumatera Utara',
+        'Kalimantan Barat' => 'Kalimantan Barat', 'Kalimantan Tengah' => 'Kalimantan Tengah',
+        'Kalimantan Selatan' => 'Kalimantan Selatan', 'Kalimantan Timur' => 'Kalimantan Timur',
+        'Kalimantan Utara' => 'Kalimantan Utara', 'Sulawesi Utara' => 'Sulawesi Utara',
+        'Sulawesi Tengah' => 'Sulawesi Tengah', 'Sulawesi Selatan' => 'Sulawesi Selatan',
+        'Sulawesi Tenggara' => 'Sulawesi Tenggara', 'Sulawesi Barat' => 'Sulawesi Barat',
+        'Papua Barat Daya' => 'Papua Barat Daya', 'Papua Pegunungan' => 'Papua Pegunungan',
+        'Papua Selatan' => 'Papua Selatan', 'Papua Tengah' => 'Papua Tengah',
+        'Papua Barat' => 'Papua Barat', 'Jawa Barat' => 'Jawa Barat', 'Jawa Tengah' => 'Jawa Tengah',
+        'Jawa Timur' => 'Jawa Timur', 'Banten' => 'Banten', 'Bali' => 'Bali',
+        'Gorontalo' => 'Gorontalo', 'Maluku Utara' => 'Maluku Utara', 'Maluku' => 'Maluku',
+        'Papua' => 'Papua', 'Aceh' => 'Aceh', 'Riau' => 'Riau', 'Jambi' => 'Jambi',
+        'Bengkulu' => 'Bengkulu', 'Lampung' => 'Lampung',
+    ];
+    $province = null;
+    foreach ($provinceNames as $name => $canonical) {
+        if (preg_match('/(?<![\p{L}])' . preg_quote($name, '/') . '(?![\p{L}])/iu', $text)) {
+            $province = $canonical;
+            break;
+        }
+    }
+
+    $city = null;
+    if (preg_match('/\b((?:Kota(?:\s+Administratif)?|Kabupaten)\s+[^,;.]+)/iu', $text, $matches)) {
+        $city = trim($matches[1]);
+        $city = preg_replace('/\s+\d{5}\b.*$/u', '', $city) ?? $city;
+        $city = str_ireplace(['Kota Bks', 'Kota Bks.', 'Kab. Bks'], ['Kota Bekasi', 'Kota Bekasi', 'Kabupaten Bekasi'], $city);
+    }
+
+    if ($city === null) {
+        // A title like "Jakarta Utara - Kelapa Gading" provides a useful city fallback.
+        $parts = preg_split('/\s+-\s+/u', $title, 2);
+        if (count($parts) === 2) {
+            $titleCity = trim($parts[0]);
+            if ($province !== null && strcasecmp($titleCity, $province) === 0) {
+                $titleCity = trim($parts[1]);
+            }
+            if (preg_match('/^(?:Jakarta\s+(?:Utara|Selatan|Barat|Timur|Pusat))$/iu', $titleCity)) {
+                $city = 'Kota ' . $titleCity;
+            } elseif ($titleCity !== '') {
+                $city = preg_match('/^(?:Kota|Kabupaten)\b/iu', $titleCity) ? $titleCity : 'Kota ' . $titleCity;
+            }
+        }
+    }
+
+    if ($province === null && is_string($city)
+        && preg_match('/^Kota Jakarta (?:Utara|Selatan|Barat|Timur|Pusat)$/iu', $city)) {
+        $province = 'DKI Jakarta';
+    }
+
+    $district = null;
+    if (preg_match('/\bKec(?:amatan)?\.?\s*([^,;]+)/iu', $text, $matches)) {
+        $district = trim($matches[1]);
+        $district = preg_replace('/\s+\d{5}\b.*$/u', '', $district) ?? $district;
+        $district = str_ireplace(['Tj.', 'Kby.', 'Ps.'], ['Tanjung', 'Kebayoran', 'Pasar'], $district);
+        $district = rtrim($district, '. ');
+    }
+
+    return ['city' => $city, 'province' => $province, 'district' => $district];
+}
+
+function enrichBranchFromMaps(array $branch, ?array $existing = null, bool $resolveShortLink = true): array
+{
+    $title = trim((string) ($branch['title'] ?? $existing['title'] ?? ''));
+    $address = trim((string) ($branch['address'] ?? $existing['address'] ?? ''));
+    $mapLink = trim((string) ($branch['map_link'] ?? '')) ?: trim((string) ($existing['map_link'] ?? ''));
+    $mapEmbedUrl = trim((string) ($branch['map_embed_url'] ?? '')) ?: trim((string) ($existing['map_embed_url'] ?? ''));
+    $coordinates = coordinatesFromMapsUrl($mapLink) ?? coordinatesFromMapsUrl($mapEmbedUrl);
+    $missingCoordinates = (empty($branch['latitude']) && empty($existing['latitude']))
+        || (empty($branch['longitude']) && empty($existing['longitude']));
+    if ($coordinates === null && $resolveShortLink && $missingCoordinates && $mapLink !== '') {
+        $coordinates = coordinatesFromMapsUrl(expandMapsShortUrl($mapLink));
+    }
+    if ($coordinates !== null) {
+        if (empty($branch['latitude']) && empty($existing['latitude'])) {
+            $branch['latitude'] = $coordinates['latitude'];
+        }
+        if (empty($branch['longitude']) && empty($existing['longitude'])) {
+            $branch['longitude'] = $coordinates['longitude'];
+        }
+    }
+
+    $areas = branchAreasFromText($address, $title);
+    foreach (['city', 'province', 'district'] as $field) {
+        if (empty($branch[$field]) && empty($existing[$field]) && !empty($areas[$field])) {
+            $branch[$field] = $areas[$field];
+        }
+    }
+
+    return $branch;
 }
 
 // =====================================================
@@ -1035,6 +1271,13 @@ function syncBranch(PDO $pdo, array $branch): string
         'notes'         => 255,
         'map_embed_url' => 60000,
         'map_link'      => 60000,
+        'latitude'      => 20,
+        'longitude'     => 20,
+        'status'        => 20,
+        'opening_date'  => 10,
+        'city'          => 150,
+        'province'      => 150,
+        'district'      => 150,
     ];
 
     $fields = array_keys($limits);
@@ -1050,23 +1293,46 @@ function syncBranch(PDO $pdo, array $branch): string
     $check->execute([':number' => $numberInt]);
     $existing = $check->fetch();
 
+    $branch = enrichBranchFromMaps($branch, is_array($existing) ? $existing : null, empty($branch['_map_link_checked']));
+
     $values = [];
 
     foreach ($fields as $field) {
-        $newValue = trim((string) ($branch[$field] ?? ''));
+        $rawValue = $branch[$field] ?? null;
+        $newValue = $rawValue === null ? '' : trim((string) $rawValue);
 
-        if ($existing && $newValue === '' && in_array($field, PRESERVE_WHEN_EMPTY, true)) {
-            $values[$field] = trim((string) ($existing[$field] ?? ''));
+        if ($existing && $newValue === '' && (in_array($field, PRESERVE_WHEN_EMPTY, true)
+            || in_array($field, ['latitude', 'longitude', 'status', 'opening_date', 'city', 'province', 'district'], true))) {
+            $values[$field] = $existing[$field] ?? null;
+        } elseif ($newValue === '' && in_array($field, ['latitude', 'longitude', 'status', 'opening_date', 'city', 'province', 'district'], true)) {
+            $values[$field] = null;
         } else {
             $values[$field] = mb_substr($newValue, 0, $limits[$field], 'UTF-8');
         }
+    }
+
+    foreach (['latitude' => [-90, 90], 'longitude' => [-180, 180]] as $coordinate => [$minimum, $maximum]) {
+        if ($values[$coordinate] !== null) {
+            $numberValue = filter_var($values[$coordinate], FILTER_VALIDATE_FLOAT);
+            $values[$coordinate] = $numberValue !== false && is_finite((float) $numberValue)
+                && $numberValue >= $minimum && $numberValue <= $maximum
+                    ? number_format((float) $numberValue, 7, '.', '')
+                    : ($existing[$coordinate] ?? null);
+        }
+    }
+    if ($values['status'] !== null && !in_array($values['status'], ['active', 'coming_soon', 'temp_closed', 'closed'], true)) {
+        $values['status'] = $existing['status'] ?? null;
+    }
+    if ($values['opening_date'] !== null && (!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $values['opening_date'])
+        || !checkdate((int) substr($values['opening_date'], 5, 2), (int) substr($values['opening_date'], 8, 2), (int) substr($values['opening_date'], 0, 4)))) {
+        $values['opening_date'] = $existing['opening_date'] ?? null;
     }
 
     if ($existing) {
         $changed = $hasSort && (int) ($existing['sort_order'] ?? 0) !== $numberInt;
 
         foreach ($fields as $field) {
-            if (trim((string) ($existing[$field] ?? '')) !== $values[$field]) {
+            if ((string) ($existing[$field] ?? '') !== (string) ($values[$field] ?? '')) {
                 $changed = true;
                 break;
             }
@@ -1134,15 +1400,22 @@ function deleteMissingBranches(PDO $pdo, array $keepNumbers, callable $log): int
     }
 
     $rows = $pdo->query(
-        'SELECT id, branch_number, title FROM `' . DB_TABLE . '`'
+        'SELECT id, branch_number, title, status FROM `' . DB_TABLE . '`'
     )->fetchAll();
 
     $keep = array_map('intval', $keepNumbers);
     $toDelete = [];
 
     foreach ($rows as $row) {
-        if (!in_array((int) $row['branch_number'], $keep, true)) {
+        if (!in_array((int) $row['branch_number'], $keep, true) && ($row['status'] ?? null) !== 'closed') {
             $toDelete[] = $row;
+        } elseif (!in_array((int) $row['branch_number'], $keep, true) && ($row['status'] ?? null) === 'closed') {
+            $log(
+                str_pad((string) $row['branch_number'], 6)
+                . str_pad('RETAINED', 10)
+                . mb_substr((string) $row['title'], 0, 39, 'UTF-8')
+                . ' (status closed)'
+            );
         }
     }
 
@@ -1209,10 +1482,15 @@ function runSync(?callable $logger = null, ?PDO $pdo = null): array
 
     $pdo = $pdo ?? connectDatabase();
 
-    $log('Database     : ' . (string) $pdo->query('SELECT DATABASE()')->fetchColumn());
+    $dbInfo = $pdo->query('SELECT DATABASE() AS db_name, @@hostname AS db_host, @@port AS db_port')->fetch();
+    $log('Database     : ' . (string) ($dbInfo['db_name'] ?? '') . ' @ '
+        . (string) ($dbInfo['db_host'] ?? '') . ':' . (string) ($dbInfo['db_port'] ?? ''));
     $log('Tabel        : ' . DB_TABLE);
 
     ensureTable($pdo);
+
+    $log('Lokasi       : koordinat diambil dari map_link/map_embed_url; kota, provinsi, dan distrik dibaca dari alamat/judul.');
+    $log('Status/tanggal pembukaan tidak ada di URL peta; nilai lama dipertahankan, data baru tetap NULL.');
 
     $html = fetchWebsite(SOURCE_URL, $log);
 
@@ -1230,6 +1508,54 @@ function runSync(?callable $logger = null, ?PDO $pdo = null): array
     }
 
     diagnoseBranches($branches, $log);
+
+    // Read existing rows and resolve all short Maps links before opening a write transaction.
+    $existingForLocation = $pdo->prepare(
+        'SELECT * FROM `' . DB_TABLE . '` WHERE CAST(branch_number AS UNSIGNED) = :number ORDER BY id ASC LIMIT 1'
+    );
+    $savedBranches = [];
+    $shortMapLinks = [];
+    foreach ($branches as $branchForLookup) {
+        $number = (int) $branchForLookup['branch_number'];
+        $existingForLocation->execute([':number' => $number]);
+        $savedBranch = $existingForLocation->fetch();
+        $savedBranches[$number] = is_array($savedBranch) ? $savedBranch : null;
+
+        $mapLink = trim((string) ($branchForLookup['map_link'] ?? ''))
+            ?: trim((string) ($savedBranch['map_link'] ?? ''));
+        $mapEmbedUrl = trim((string) ($branchForLookup['map_embed_url'] ?? ''))
+            ?: trim((string) ($savedBranch['map_embed_url'] ?? ''));
+        $missingCoordinates = (empty($branchForLookup['latitude']) && empty($savedBranch['latitude']))
+            || (empty($branchForLookup['longitude']) && empty($savedBranch['longitude']));
+        if ($missingCoordinates && coordinatesFromMapsUrl($mapLink) === null
+            && coordinatesFromMapsUrl($mapEmbedUrl) === null
+            && preg_match('~^https?://(?:maps\.app\.goo\.gl|share\.google)/~i', $mapLink)) {
+            $shortMapLinks[] = $mapLink;
+        }
+    }
+    $shortMapLinks = array_values(array_unique($shortMapLinks));
+    $resolvedMapLinks = expandMapsShortUrls($shortMapLinks);
+    $resolvedCount = count(array_filter($shortMapLinks, static function (string $url) use ($resolvedMapLinks): bool {
+        return coordinatesFromMapsUrl($resolvedMapLinks[$url] ?? $url) !== null;
+    }));
+    $log('Tautan pendek Maps dengan koordinat terbaca: ' . $resolvedCount . '/' . count($shortMapLinks) . '.');
+
+    $branchesWithCoordinates = 0;
+    foreach ($branches as &$branchWithMapData) {
+        $savedBranch = $savedBranches[(int) $branchWithMapData['branch_number']] ?? null;
+        $branchWithMapData = enrichBranchFromMaps(
+            $branchWithMapData,
+            is_array($savedBranch) ? $savedBranch : null,
+            true
+        );
+        $branchWithMapData['_map_link_checked'] = true;
+        if (!empty($branchWithMapData['latitude'] ?? $savedBranch['latitude'] ?? null)
+            && !empty($branchWithMapData['longitude'] ?? $savedBranch['longitude'] ?? null)) {
+            $branchesWithCoordinates++;
+        }
+    }
+    unset($branchWithMapData);
+    $log("Koordinat dari Maps URL: {$branchesWithCoordinates}/" . count($branches) . ' cabang memiliki pasangan koordinat.');
 
     $dupes = $pdo->query(
         'SELECT CAST(branch_number AS UNSIGNED) AS n, COUNT(*) AS c FROM `' . DB_TABLE . '`

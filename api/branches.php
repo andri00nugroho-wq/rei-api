@@ -29,7 +29,17 @@ const BRANCH_COLUMN_ALIASES = [
     'notes'         => ['notes', 'note', 'catatan', 'keterangan'],
     'map_link'      => ['map_link', 'maps_link', 'link_peta', 'map_url'],
     'map_embed_url' => ['map_embed_url', 'map_embed', 'embed_peta', 'embed_url'],
+    'sort_order'    => ['sort_order'],
+    'latitude'      => ['latitude'],
+    'longitude'     => ['longitude'],
+    'status'        => ['status'],
+    'opening_date'  => ['opening_date'],
+    'city'          => ['city'],
+    'province'      => ['province'],
+    'district'      => ['district'],
 ];
+
+const BRANCH_STATUSES = ['active', 'coming_soon', 'temp_closed', 'closed'];
 
 function cleanText(mixed $v): string
 {
@@ -46,6 +56,166 @@ function cleanText(mixed $v): string
     $s = preg_replace('/\s*\R\s*/u', "\n", $s) ?? $s;
 
     return trim($s);
+}
+
+function validCoordinate(mixed $value, float $minimum, float $maximum): ?float
+{
+    if (!is_numeric($value)) {
+        return null;
+    }
+
+    $coordinate = (float) $value;
+
+    return is_finite($coordinate) && $coordinate >= $minimum && $coordinate <= $maximum
+        ? $coordinate
+        : null;
+}
+
+function requestCoordinates(): array
+{
+    $hasLatitude = array_key_exists('latitude', $_GET);
+    $hasLongitude = array_key_exists('longitude', $_GET);
+
+    if (!$hasLatitude && !$hasLongitude) {
+        return [null, null];
+    }
+
+    if (!$hasLatitude || !$hasLongitude) {
+        jsonResponse(400, [
+            'success' => false,
+            'message' => 'Latitude dan longitude pengguna harus diberikan bersama-sama.'
+        ]);
+    }
+
+    $latitude = validCoordinate($_GET['latitude'], -90, 90);
+    $longitude = validCoordinate($_GET['longitude'], -180, 180);
+
+    if ($latitude === null || $longitude === null) {
+        jsonResponse(400, [
+            'success' => false,
+            'message' => 'Koordinat pengguna tidak valid.'
+        ]);
+    }
+
+    return [$latitude, $longitude];
+}
+
+function distanceInKilometers(float $latitude, float $longitude, float $otherLatitude, float $otherLongitude): float
+{
+    $latitudeDelta = deg2rad($otherLatitude - $latitude);
+    $longitudeDelta = deg2rad($otherLongitude - $longitude);
+    $a = sin($latitudeDelta / 2) ** 2
+        + cos(deg2rad($latitude))
+        * cos(deg2rad($otherLatitude))
+        * sin($longitudeDelta / 2) ** 2;
+    $a = min(1.0, max(0.0, $a));
+
+    return 6371.0088 * 2 * atan2(sqrt($a), sqrt(1 - $a));
+}
+
+function validOpeningDate(mixed $value): ?string
+{
+    if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return null;
+    }
+
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+    $errors = DateTimeImmutable::getLastErrors();
+
+    if (
+        $date === false
+        || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+        || $date->format('Y-m-d') !== $value
+    ) {
+        return null;
+    }
+
+    return $value;
+}
+
+function normalizeBranchInput(array $data): array
+{
+    foreach (['latitude' => [-90, 90], 'longitude' => [-180, 180]] as $field => [$minimum, $maximum]) {
+        if (!array_key_exists($field, $data)) {
+            continue;
+        }
+
+        if ($data[$field] === null || $data[$field] === '') {
+            $data[$field] = null;
+            continue;
+        }
+
+        $coordinate = validCoordinate($data[$field], $minimum, $maximum);
+
+        if ($coordinate === null) {
+            jsonResponse(422, [
+                'success' => false,
+                'message' => "{$field} harus berupa angka dalam rentang {$minimum} sampai {$maximum}."
+            ]);
+        }
+
+        $data[$field] = number_format($coordinate, 7, '.', '');
+    }
+
+    if (array_key_exists('status', $data)) {
+        $status = $data['status'];
+
+        if ($status === '') {
+            $status = null;
+        }
+
+        if ($status !== null && (!is_string($status) || !in_array($status, BRANCH_STATUSES, true))) {
+            jsonResponse(422, [
+                'success' => false,
+                'message' => 'status harus active, coming_soon, temp_closed, closed, atau null.'
+            ]);
+        }
+
+        $data['status'] = $status;
+    }
+
+    if (array_key_exists('opening_date', $data)) {
+        $openingDate = $data['opening_date'];
+
+        if ($openingDate === '') {
+            $openingDate = null;
+        }
+
+        if ($openingDate !== null && validOpeningDate($openingDate) === null) {
+            jsonResponse(422, [
+                'success' => false,
+                'message' => 'opening_date harus berformat YYYY-MM-DD atau null.'
+            ]);
+        }
+
+        $data['opening_date'] = $openingDate;
+    }
+
+    foreach (['city', 'province', 'district'] as $field) {
+        if (array_key_exists($field, $data)) {
+            $data[$field] = $data[$field] === null || trim((string) $data[$field]) === ''
+                ? null
+                : trim((string) $data[$field]);
+        }
+    }
+
+    return $data;
+}
+
+function rejectUnavailableBranchFields(array $input, array $columnMap): void
+{
+    $requiredFields = ['latitude', 'longitude', 'status', 'opening_date', 'city', 'province', 'district'];
+    $unavailable = array_diff(
+        array_intersect(array_keys($input), $requiredFields),
+        array_keys($columnMap)
+    );
+
+    if ($unavailable !== []) {
+        jsonResponse(503, [
+            'success' => false,
+            'message' => 'Kolom cabang belum dimigrasikan: ' . implode(', ', $unavailable) . '.'
+        ]);
+    }
 }
 
 const REJECT_NUMERIC_TITLES = true;
@@ -104,7 +274,7 @@ function mapQuery(string $url): string
     return '';
 }
 
-function fillBranch(array $b): array
+function fillBranch(array $b, ?float $userLatitude = null, ?float $userLongitude = null): array
 {
     $title   = cleanText($b['title'] ?? '');
     $rawTitle = $title;
@@ -198,6 +368,29 @@ function fillBranch(array $b): array
     $b['notes']         = $notes;
     $b['map_link']      = $link;
     $b['map_embed_url'] = $embed;
+    $b['sort_order'] = isset($b['sort_order']) && is_numeric($b['sort_order'])
+        ? (int) $b['sort_order']
+        : null;
+    $latitude = validCoordinate($b['latitude'] ?? null, -90, 90);
+    $longitude = validCoordinate($b['longitude'] ?? null, -180, 180);
+    $b['latitude'] = $latitude;
+    $b['longitude'] = $longitude;
+    $b['status'] = isset($b['status']) && in_array($b['status'], BRANCH_STATUSES, true)
+        ? $b['status']
+        : null;
+    $b['opening_date'] = validOpeningDate($b['opening_date'] ?? null);
+
+    foreach (['city', 'province', 'district'] as $field) {
+        $value = trim((string) ($b[$field] ?? ''));
+        $b[$field] = $value === '' ? null : $value;
+    }
+
+    $b['distance_km'] = $userLatitude !== null
+        && $userLongitude !== null
+        && $latitude !== null
+        && $longitude !== null
+            ? round(distanceInKilometers($userLatitude, $userLongitude, $latitude, $longitude), 2)
+            : null;
 
     $missing = [];
 
@@ -497,6 +690,8 @@ try {
         $id = $parsedId;
     }
 
+    [$userLatitude, $userLongitude] = requestCoordinates();
+
 
     $readJsonBody = static function (): array {
         $raw = file_get_contents('php://input');
@@ -637,7 +832,7 @@ try {
             jsonResponse(200, [
                 'success' => true,
                 'message' => 'Detail cabang berhasil diambil.',
-                'data' => fillBranch($branch)
+                'data' => fillBranch($branch, $userLatitude, $userLongitude)
             ]);
         }
 
@@ -676,26 +871,74 @@ try {
             $offset = $value;
         }
 
-        $total = (int) $pdo
-            ->query('SELECT COUNT(*) FROM `branches`')
-            ->fetchColumn();
+        $whereSQL = '';
+        $queryParams = [];
+
+        if (isset($_GET['status'])) {
+            $status = $_GET['status'];
+
+            if (!is_string($status) || !in_array($status, BRANCH_STATUSES, true)) {
+                jsonResponse(400, [
+                    'success' => false,
+                    'message' => 'Filter status harus active, coming_soon, temp_closed, atau closed.'
+                ]);
+            }
+
+            if (!isset($columnMap['status'])) {
+                jsonResponse(503, [
+                    'success' => false,
+                    'message' => 'Filter status belum tersedia karena kolom status belum dimigrasikan.'
+                ]);
+            }
+
+            $whereSQL = ' WHERE `' . $columnMap['status'] . '` = :status';
+            $queryParams['status'] = $status;
+        }
+
+        $countStatement = $pdo->prepare('SELECT COUNT(*) FROM `branches`' . $whereSQL);
+        $countStatement->execute($queryParams);
+        $total = (int) $countStatement->fetchColumn();
 
         $orderBy = isset($columnMap['branch_number'])
             ? 'CAST(`' . $columnMap['branch_number'] . '` AS UNSIGNED) ASC, `id` ASC'
             : '`id` DESC';
 
-        $stmt = $pdo->prepare(
-            "SELECT {$selectSQL}
-             FROM `branches`
-             ORDER BY {$orderBy}
-             LIMIT :limit OFFSET :offset"
-        );
+        if ($userLatitude !== null && $userLongitude !== null) {
+            $stmt = $pdo->prepare(
+                "SELECT {$selectSQL}
+                 FROM `branches`{$whereSQL}
+                 ORDER BY {$orderBy}"
+            );
+            $stmt->execute($queryParams);
 
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
-        $stmt->execute();
+            $branches = array_map(
+                static fn(array $branch): array => fillBranch($branch, $userLatitude, $userLongitude),
+                $stmt->fetchAll()
+            );
 
-        $branches = array_map('fillBranch', $stmt->fetchAll());
+            usort(
+                $branches,
+                static fn(array $left, array $right): int =>
+                    ($left['distance_km'] ?? PHP_FLOAT_MAX) <=> ($right['distance_km'] ?? PHP_FLOAT_MAX)
+            );
+
+            $branches = array_slice($branches, $offset, $limit);
+        } else {
+            $stmt = $pdo->prepare(
+                "SELECT {$selectSQL}
+                 FROM `branches`{$whereSQL}
+                 ORDER BY {$orderBy}
+                 LIMIT :limit OFFSET :offset"
+            );
+            foreach ($queryParams as $name => $value) {
+                $stmt->bindValue(':' . $name, $value, PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $stmt->execute();
+
+            $branches = array_map('fillBranch', $stmt->fetchAll());
+        }
 
         jsonResponse(200, [
             'success' => true,
@@ -728,6 +971,8 @@ try {
             ]);
         }
 
+        rejectUnavailableBranchFields($input, $columnMap);
+
         $data = array_intersect_key(
             $input,
             array_flip($writableColumns)
@@ -748,6 +993,8 @@ try {
                 ]);
             }
         }
+
+        $data = normalizeBranchInput($data);
 
         $incomingTitle = (string) ($data['title'] ?? '');
         $skipReason = null;
@@ -854,6 +1101,8 @@ try {
             ]);
         }
 
+        rejectUnavailableBranchFields($input, $columnMap);
+
         $data = array_intersect_key(
             $input,
             array_flip($writableColumns)
@@ -874,6 +1123,8 @@ try {
                 ]);
             }
         }
+
+        $data = normalizeBranchInput($data);
 
         $check = $pdo->prepare(
             'SELECT COUNT(*) FROM `branches` WHERE `id` = :id'
@@ -963,6 +1214,13 @@ try {
 
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
+
+        if ($row !== false && ($row['status'] ?? null) === 'closed') {
+            jsonResponse(409, [
+                'success' => false,
+                'message' => 'Cabang berstatus closed harus tetap disimpan. Ubah statusnya, bukan hapus record.'
+            ]);
+        }
 
         $key = $row !== false ? blockKey((string) ($row['title'] ?? '')) : '';
         $blocked = false;

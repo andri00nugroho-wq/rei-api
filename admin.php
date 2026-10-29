@@ -10,6 +10,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 require 'config.php';
 
 // Otomatis buat tabel branches jika belum ada
+$branch_schema_error = '';
 try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS `branches` (
       `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -23,11 +24,32 @@ try {
       `map_link` TEXT NOT NULL,
       `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
-} catch (PDOException $e) {}
+
+    $branchColumns = array_column($pdo->query("SHOW COLUMNS FROM `branches`")->fetchAll(PDO::FETCH_ASSOC), 'Field');
+    $branchColumnDefinitions = [
+        'latitude' => 'DECIMAL(10,7) NULL',
+        'longitude' => 'DECIMAL(10,7) NULL',
+        'status' => "ENUM('active','coming_soon','temp_closed','closed') NULL DEFAULT NULL",
+        'opening_date' => 'DATE NULL',
+        'city' => 'VARCHAR(150) NULL',
+        'province' => 'VARCHAR(150) NULL',
+        'district' => 'VARCHAR(150) NULL',
+    ];
+
+    foreach ($branchColumnDefinitions as $column => $definition) {
+        if (!in_array($column, $branchColumns, true)) {
+            $pdo->exec("ALTER TABLE `branches` ADD COLUMN `{$column}` {$definition}");
+        }
+    }
+} catch (PDOException $e) {
+    error_log('[REI ADMIN][BRANCH SCHEMA] ' . $e->getMessage());
+    $branch_schema_error = 'Struktur tabel cabang belum siap. Periksa izin database untuk menambah kolom cabang.';
+}
 
 $page = $_GET['page'] ?? 'dashboard';
 $msg = '';
 $msg_setting = '';
+$branch_error = '';
 $sync_log = '';
 $sync_error = '';
 if (empty($_SESSION['branch_sync_csrf'])) {
@@ -185,32 +207,79 @@ if ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST'
         }
     }
 } elseif ($page === 'branches' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['action']) && $_POST['action'] === 'edit') {
-        $stmt = $pdo->prepare("UPDATE branches SET branch_number = ?, title = ?, address = ?, phone = ?, hours = ?, notes = ?, map_embed_url = ?, map_link = ? WHERE id = ?");
-        $stmt->execute([
-            $_POST['branch_number'], $_POST['title'], $_POST['address'], 
-            $_POST['phone'], $_POST['hours'], $_POST['notes'], 
-            $_POST['map_embed_url'] ?? '', $_POST['map_link'] ?? '', $_POST['branch_id']
-        ]);
-        $msg = "Cabang toko berhasil diperbarui!";
+    $branchFormData = $_POST;
+    $latitudeInput = trim((string) ($_POST['latitude'] ?? ''));
+    $longitudeInput = trim((string) ($_POST['longitude'] ?? ''));
+    $statusInput = trim((string) ($_POST['status'] ?? ''));
+    $openingDateInput = trim((string) ($_POST['opening_date'] ?? ''));
+    $latitude = $latitudeInput === '' ? null : filter_var($latitudeInput, FILTER_VALIDATE_FLOAT);
+    $longitude = $longitudeInput === '' ? null : filter_var($longitudeInput, FILTER_VALIDATE_FLOAT);
+    $validStatuses = ['active', 'coming_soon', 'temp_closed', 'closed'];
+
+    if ($branch_schema_error !== '') {
+        $branch_error = $branch_schema_error;
+    } elseif ($latitudeInput !== '' && ($latitude === false || !is_finite((float) $latitude) || $latitude < -90 || $latitude > 90)) {
+        $branch_error = 'Latitude harus berupa angka antara -90 sampai 90.';
+    } elseif ($longitudeInput !== '' && ($longitude === false || !is_finite((float) $longitude) || $longitude < -180 || $longitude > 180)) {
+        $branch_error = 'Longitude harus berupa angka antara -180 sampai 180.';
+    } elseif ($statusInput !== '' && !in_array($statusInput, $validStatuses, true)) {
+        $branch_error = 'Status cabang tidak valid.';
+    } elseif ($openingDateInput !== '' && (
+        !preg_match('/^\d{4}-\d{2}-\d{2}$/', $openingDateInput)
+        || !checkdate(
+            (int) substr($openingDateInput, 5, 2),
+            (int) substr($openingDateInput, 8, 2),
+            (int) substr($openingDateInput, 0, 4)
+        )
+    )) {
+        $branch_error = 'Tanggal pembukaan harus berformat YYYY-MM-DD.';
     } else {
-        $stmt = $pdo->prepare("INSERT INTO branches (branch_number, title, address, phone, hours, notes, map_embed_url, map_link) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([
-            $_POST['branch_number'], $_POST['title'], $_POST['address'], 
-            $_POST['phone'], $_POST['hours'], $_POST['notes'], 
-            $_POST['map_embed_url'] ?? '', $_POST['map_link'] ?? ''
-        ]);
-        $msg = "Cabang toko berhasil ditambahkan!";
+        $branchValues = [
+            trim((string) ($_POST['branch_number'] ?? '')),
+            trim((string) ($_POST['title'] ?? '')),
+            trim((string) ($_POST['address'] ?? '')),
+            trim((string) ($_POST['phone'] ?? '')),
+            trim((string) ($_POST['hours'] ?? '')),
+            trim((string) ($_POST['notes'] ?? '')),
+            (string) ($_POST['map_embed_url'] ?? ''),
+            (string) ($_POST['map_link'] ?? ''),
+            $latitude === null ? null : number_format((float) $latitude, 7, '.', ''),
+            $longitude === null ? null : number_format((float) $longitude, 7, '.', ''),
+            $statusInput === '' ? null : $statusInput,
+            $openingDateInput === '' ? null : $openingDateInput,
+            trim((string) ($_POST['city'] ?? '')) ?: null,
+            trim((string) ($_POST['province'] ?? '')) ?: null,
+            trim((string) ($_POST['district'] ?? '')) ?: null,
+        ];
+
+        if (isset($_POST['action']) && $_POST['action'] === 'edit') {
+            $stmt = $pdo->prepare("UPDATE branches SET branch_number = ?, title = ?, address = ?, phone = ?, hours = ?, notes = ?, map_embed_url = ?, map_link = ?, latitude = ?, longitude = ?, status = ?, opening_date = ?, city = ?, province = ?, district = ? WHERE id = ?");
+            $stmt->execute([...$branchValues, (int) ($_POST['branch_id'] ?? 0)]);
+            $msg = "Cabang toko berhasil diperbarui!";
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO branches (branch_number, title, address, phone, hours, notes, map_embed_url, map_link, latitude, longitude, status, opening_date, city, province, district) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute($branchValues);
+            $msg = "Cabang toko berhasil ditambahkan!";
+        }
     }
 }
 if ($page === 'branches' && isset($_GET['delete_branch'])) {
     $id = $_GET['delete_branch'];
-    $pdo->prepare("DELETE FROM branches WHERE id = ?")->execute([$id]);
-    header("Location: admin.php?page=branches");
-    exit;
+    $branchCheck = $pdo->prepare("SELECT status FROM branches WHERE id = ?");
+    $branchCheck->execute([$id]);
+    $branchToDelete = $branchCheck->fetch(PDO::FETCH_ASSOC);
+
+    if (($branchToDelete['status'] ?? null) === 'closed') {
+        $branch_error = 'Cabang berstatus closed tetap disimpan. Edit statusnya jika perlu, jangan hapus record.';
+    } else {
+        $pdo->prepare("DELETE FROM branches WHERE id = ?")->execute([$id]);
+        header("Location: admin.php?page=branches");
+        exit;
+    }
 }
 
 $edit_branch_data = null;
+$branchFormData = $branchFormData ?? [];
 if ($page === 'branches' && isset($_GET['edit_branch'])) {
     $stmt_edit = $pdo->prepare("SELECT * FROM branches WHERE id = ?");
     $stmt_edit->execute([$_GET['edit_branch']]);
@@ -450,6 +519,7 @@ foreach($chart_data as $cd) {
 
                 <?php elseif ($page === 'branches'): ?>
                     <?php if($msg): ?><div class='mb-4 p-4 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-medium'><?= htmlspecialchars($msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
+                    <?php if($branch_error !== ''): ?><div class='mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium'><?= htmlspecialchars($branch_error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <?php if($sync_error): ?><div class='mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium'><strong>Sinkronisasi gagal:</strong> <?= htmlspecialchars($sync_error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div><?php endif; ?>
                     <div class="mb-6 bg-white p-5 md:p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                         <div>
@@ -491,7 +561,7 @@ foreach($chart_data as $cd) {
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Alamat Lengkap</label>
-                                    <textarea name="address" required rows="2" placeholder="Rukan Golf Island..." class="w-full mt-1 p-2.5 border rounded-xl text-sm"><?= htmlspecialchars($edit_branch_data['address'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></textarea>
+                                    <textarea name="address" required rows="2" placeholder="Alamat lengkap cabang..." class="w-full mt-1 p-2.5 border rounded-xl text-sm"><?= htmlspecialchars($branchFormData['address'] ?? $edit_branch_data['address'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></textarea>
                                 </div>
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">No. HP / WhatsApp</label>
@@ -504,6 +574,46 @@ foreach($chart_data as $cd) {
                                 <div>
                                     <label class="text-xs font-medium text-gray-500">Catatan Khusus</label>
                                     <input type="text" name="notes" value="<?= htmlspecialchars($edit_branch_data['notes'] ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="BUKA SETIAP HARI" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs font-medium text-gray-500">Latitude (opsional)</label>
+                                        <input type="number" step="0.0000001" min="-90" max="90" name="latitude" value="<?= htmlspecialchars((string) ($branchFormData['latitude'] ?? $edit_branch_data['latitude'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="-6.2000000" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs font-medium text-gray-500">Longitude (opsional)</label>
+                                        <input type="number" step="0.0000001" min="-180" max="180" name="longitude" value="<?= htmlspecialchars((string) ($branchFormData['longitude'] ?? $edit_branch_data['longitude'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="106.8166667" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    </div>
+                                </div>
+                                <p class="-mt-2 text-[11px] text-gray-500">Masukkan koordinat outlet yang sudah diverifikasi. Jangan menyalin koordinat perkiraan.</p>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Status Operasional</label>
+                                    <?php $selectedBranchStatus = (string) ($branchFormData['status'] ?? $edit_branch_data['status'] ?? ''); ?>
+                                    <select name="status" class="w-full mt-1 p-2.5 border rounded-xl text-sm bg-white">
+                                        <option value="" <?= $selectedBranchStatus === '' ? 'selected' : '' ?>>Belum diketahui</option>
+                                        <option value="active" <?= $selectedBranchStatus === 'active' ? 'selected' : '' ?>>Active - Beroperasi</option>
+                                        <option value="coming_soon" <?= $selectedBranchStatus === 'coming_soon' ? 'selected' : '' ?>>Coming soon - Akan dibuka</option>
+                                        <option value="temp_closed" <?= $selectedBranchStatus === 'temp_closed' ? 'selected' : '' ?>>Temp closed - Tutup sementara</option>
+                                        <option value="closed" <?= $selectedBranchStatus === 'closed' ? 'selected' : '' ?>>Closed - Tutup permanen</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500">Tanggal Pembukaan (opsional)</label>
+                                    <input type="date" name="opening_date" value="<?= htmlspecialchars((string) ($branchFormData['opening_date'] ?? $edit_branch_data['opening_date'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                </div>
+                                <div class="grid grid-cols-1 gap-3">
+                                    <div>
+                                        <label class="text-xs font-medium text-gray-500">Kabupaten / Kota</label>
+                                        <input type="text" name="city" value="<?= htmlspecialchars((string) ($branchFormData['city'] ?? $edit_branch_data['city'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="Kota Jakarta Utara" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs font-medium text-gray-500">Provinsi</label>
+                                        <input type="text" name="province" value="<?= htmlspecialchars((string) ($branchFormData['province'] ?? $edit_branch_data['province'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="DKI Jakarta" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs font-medium text-gray-500">Kecamatan (opsional)</label>
+                                        <input type="text" name="district" value="<?= htmlspecialchars((string) ($branchFormData['district'] ?? $edit_branch_data['district'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" placeholder="Kosongkan jika belum diketahui" class="w-full mt-1 p-2.5 border rounded-xl text-sm">
+                                    </div>
                                 </div>
                                 <!-- <div>
                                     <label class="text-xs font-medium text-gray-500">Link URL Embed Google Maps (src iframe saja)</label>

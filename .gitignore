@@ -5,3 +5,4 @@ password : admin123
 
 debug-branches.html
 rei_cms_v1.sql
+.env
